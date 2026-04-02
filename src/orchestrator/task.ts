@@ -41,7 +41,7 @@ export function createTask(
         : params.priority ?? TaskPriority.Normal,
     status: TaskStatus.Pending,
     retryCount: 0,
-    maxRetries: params.maxRetries ?? 1,
+    maxRetries: params.maxRetries ?? 3,
     error: null,
     created: Date.now(),
   };

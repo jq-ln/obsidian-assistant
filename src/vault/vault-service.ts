@@ -15,11 +15,22 @@ export class VaultService {
 
   async writeNote(path: string, content: string): Promise<void> {
     const normalized = normalizePath(path);
-    const existing = this.app.vault.getAbstractFileByPath(normalized);
-    if (existing && existing instanceof TFile) {
-      await this.app.vault.modify(existing, content);
-    } else {
-      await this.app.vault.create(normalized, content);
+    const maxAttempts = 3;
+    const delayMs = 2000;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const existing = this.app.vault.getAbstractFileByPath(normalized);
+        if (existing && existing instanceof TFile) {
+          await this.app.vault.modify(existing, content);
+        } else {
+          await this.app.vault.create(normalized, content);
+        }
+        return; // success
+      } catch (err) {
+        if (attempt === maxAttempts) throw err;
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
     }
   }
 

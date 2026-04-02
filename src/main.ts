@@ -509,12 +509,33 @@ export default class AssistantPlugin extends Plugin {
     }
     const rankedTasks = this.taskAggregator.rankTasks(allTasks, 15);
 
+    // Collect recently modified files (last 7 days)
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const recentActivity = this.vaultService
+      .getMarkdownFiles()
+      .filter((f) => f.stat.mtime > sevenDaysAgo)
+      .sort((a, b) => b.stat.mtime - a.stat.mtime)
+      .map((f) => ({
+        path: f.path,
+        action: "modified",
+        date: new Date(f.stat.mtime).toISOString().split("T")[0],
+      }));
+
+    // Count notes that have suggested-tags in their frontmatter
+    let pendingSuggestions = 0;
+    for (const file of this.vaultService.getMarkdownFiles()) {
+      const fm = await this.vaultService.parseFrontmatter(file.path);
+      if (Array.isArray(fm["suggested-tags"]) && fm["suggested-tags"].length > 0) {
+        pendingSuggestions++;
+      }
+    }
+
     const md = this.dashboard.renderDashboard({
       goalsContent,
       tasksMarkdown: this.taskAggregator.renderTasksMarkdown(rankedTasks),
       habitsMarkdown: this.habitTracker.renderHabitsMarkdown(habits, habitLog, today),
-      recentActivity: [], // TODO: pull from queue completed tasks
-      pendingSuggestions: 0,
+      recentActivity,
+      pendingSuggestions,
       failedTasks: this.orchestrator.queue.getFailedTasks().length,
     });
 

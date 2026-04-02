@@ -94,10 +94,11 @@ describe("TaskQueue", () => {
     });
 
     it("marks task as failed with error", () => {
-      queue.enqueue(makeTask());
-      const task = queue.dequeueNext()!;
-      queue.failTask(task.id, "Something broke");
-      const found = queue.getTask(task.id);
+      const task = makeTask({ maxRetries: 1 });
+      queue.enqueue(task);
+      const dequeued = queue.dequeueNext()!;
+      queue.failTask(dequeued.id, "Something broke");
+      const found = queue.getTask(dequeued.id);
       expect(found?.status).toBe(TaskStatus.Failed);
       expect(found?.error).toBe("Something broke");
       expect(found?.retryCount).toBe(1);
