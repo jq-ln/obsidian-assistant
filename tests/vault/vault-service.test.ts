@@ -97,6 +97,22 @@ describe("VaultService", () => {
       expect(fm).toEqual({ tags: ["ai"], custom: "value" });
     });
 
+    it("strips surrounding quotes from string values", async () => {
+      vault._seed(
+        "quoted.md",
+        '---\ntitle: "My Note: Part 2"\nauthor: \'Jane Doe\'\n---\n# Content',
+      );
+      const fm = await service.parseFrontmatter("quoted.md");
+      expect(fm.title).toBe("My Note: Part 2");
+      expect(fm.author).toBe("Jane Doe");
+    });
+
+    it("handles values with colons in them", async () => {
+      vault._seed("url.md", "---\nurl: http://example.com\n---\n# Content");
+      const fm = await service.parseFrontmatter("url.md");
+      expect(fm.url).toBe("http://example.com");
+    });
+
     it("returns empty object for notes without frontmatter", async () => {
       vault._seed("nofm.md", "# Just content");
       const fm = await service.parseFrontmatter("nofm.md");

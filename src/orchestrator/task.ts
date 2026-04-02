@@ -51,3 +51,12 @@ export function createTask(
 export function _resetIdCounter(): void {
   nextId = 1;
 }
+
+/** Sync the ID counter with existing task IDs to avoid collisions after deserialization. */
+export function syncIdCounter(existingIds: string[]): void {
+  const maxId = existingIds.reduce((max, id) => {
+    const num = parseInt(id, 10);
+    return isNaN(num) ? max : Math.max(max, num);
+  }, 0);
+  nextId = maxId + 1;
+}

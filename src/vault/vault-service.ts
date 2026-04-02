@@ -121,7 +121,15 @@ export class VaultService {
           result[currentKey] = currentArray;
         }
         currentKey = keyMatch[1];
-        const value = keyMatch[2].trim();
+        let value = keyMatch[2].trim();
+
+        // Strip surrounding quotes from string values
+        if (
+          (value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'"))
+        ) {
+          value = value.slice(1, -1);
+        }
 
         if (value === "" || value === "[]") {
           // Could be start of array or empty value

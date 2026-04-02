@@ -170,6 +170,69 @@ describe("Orchestrator", () => {
     expect(claude.complete).not.toHaveBeenCalled();
   });
 
+  it("attaches _batchResponse and _batchSize to each task in a batch", async () => {
+    const batchResponse = JSON.stringify({
+      results: [
+        { path: "note-a.md", tags: ["ai"] },
+        { path: "note-b.md", tags: ["physics"] },
+      ],
+    });
+
+    ollama.complete.mockResolvedValue({
+      content: batchResponse,
+      tokensUsed: { input: 200, output: 80 },
+      model: "llama3:8b",
+      durationMs: 300,
+    } satisfies LLMResponse);
+
+    const completedCalls: Array<{ task: any; response: any }> = [];
+    orchestrator = new Orchestrator({
+      queue,
+      router: new TaskRouter(ollama, claude, false),
+      batcher: new TaskBatcher({ maxBatchSize: 10, contextWindowTokens: 8000 }),
+      costTracker,
+      providers: { ollama, claude },
+      settings: { claudeDailyBudget: 0, claudeMonthlyBudget: 0 },
+      onTaskCompleted: (task, response) => completedCalls.push({ task, response }),
+      onTaskFailed: vi.fn(),
+      onTaskDeferred: vi.fn(),
+      onCostWarning: vi.fn(),
+    });
+
+    queue.enqueue(
+      createTask({
+        type: "tagger",
+        action: "tag-note",
+        payload: { notePath: "note-a.md", noteContent: "Content A" },
+        modelRequirement: ModelRequirement.LocalPreferred,
+        trigger: TaskTrigger.Automatic,
+      }),
+    );
+    queue.enqueue(
+      createTask({
+        type: "tagger",
+        action: "tag-note",
+        payload: { notePath: "note-b.md", noteContent: "Content B" },
+        modelRequirement: ModelRequirement.LocalPreferred,
+        trigger: TaskTrigger.Automatic,
+      }),
+    );
+
+    await orchestrator.processNext();
+
+    expect(completedCalls).toHaveLength(2);
+    for (const { task } of completedCalls) {
+      expect(task.payload._batchSize).toBe(2);
+      expect(task.payload._batchResponse).toBe(batchResponse);
+    }
+
+    // Each task should carry its own notePath so handler can extract per-task tags
+    const pathA = completedCalls.find((c) => c.task.payload.notePath === "note-a.md");
+    const pathB = completedCalls.find((c) => c.task.payload.notePath === "note-b.md");
+    expect(pathA).toBeDefined();
+    expect(pathB).toBeDefined();
+  });
+
   it("enforces cost budget", async () => {
     orchestrator = new Orchestrator({
       queue,

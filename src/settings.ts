@@ -63,16 +63,18 @@ export class AssistantSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("API Key")
-      .setDesc("Your Anthropic API key")
-      .addText((text) =>
-        (text as any)
-          .setPlaceholder("sk-ant-...")
-          .setValue(this.settings.claudeApiKey)
-          .onChange(async (value: string) => {
-            this.settings.claudeApiKey = value;
-            await this.save();
-          }),
-      );
+      .setDesc("Your Anthropic API key. Warning: stored in plugin data — exclude from sync if using Git.")
+      .addText((text) => {
+        const t = text as any;
+        t.setPlaceholder("sk-ant-...");
+        t.setValue(this.settings.claudeApiKey);
+        t.onChange(async (value: string) => {
+          this.settings.claudeApiKey = value;
+          await this.save();
+        });
+        if (t.inputEl) t.inputEl.type = "password";
+        return t;
+      });
 
     new Setting(containerEl)
       .setName("Model")

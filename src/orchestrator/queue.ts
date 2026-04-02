@@ -1,4 +1,4 @@
-import { Task } from "./task";
+import { Task, syncIdCounter } from "./task";
 import { TaskStatus, TaskPriority, TaskAction, SCHEMA_VERSION } from "../types";
 
 const PRIORITY_ORDER: Record<TaskPriority, number> = {
@@ -137,12 +137,22 @@ export class TaskQueue {
     return JSON.stringify(state, null, 2);
   }
 
+  resetTask(id: string): void {
+    const task = this.tasks.get(id);
+    if (task && task.status === TaskStatus.Failed) {
+      task.status = TaskStatus.Pending;
+      task.retryCount = 0;
+      task.error = null;
+    }
+  }
+
   static deserialize(json: string): TaskQueue {
     const queue = new TaskQueue();
     const state: QueueState = JSON.parse(json);
     for (const task of state.tasks) {
       queue.tasks.set(task.id, task);
     }
+    syncIdCounter(Array.from(queue.tasks.keys()));
     return queue;
   }
 }

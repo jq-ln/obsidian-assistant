@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { TaskQueue } from "@/orchestrator/queue";
-import { createTask, _resetIdCounter, Task } from "@/orchestrator/task";
+import { createTask, _resetIdCounter, syncIdCounter, Task } from "@/orchestrator/task";
 import {
   ModelRequirement,
   TaskTrigger,
@@ -170,6 +170,42 @@ describe("TaskQueue", () => {
       const json = queue.serialize();
       const data = JSON.parse(json);
       expect(data.schemaVersion).toBe(SCHEMA_VERSION);
+    });
+
+    it("syncs ID counter after deserialize to avoid collisions", () => {
+      queue.enqueue(makeTask()); // id "1"
+      queue.enqueue(makeTask()); // id "2"
+
+      const json = queue.serialize();
+      _resetIdCounter(); // Simulate plugin reload resetting the counter
+      TaskQueue.deserialize(json); // Should sync counter to 3
+
+      // Next task created should not collide with restored tasks
+      const newTask = makeTask();
+      expect(newTask.id).toBe("3");
+    });
+  });
+
+  describe("resetTask", () => {
+    it("resets a failed task back to pending with zero retries", () => {
+      const task = makeTask({ maxRetries: 1 });
+      queue.enqueue(task);
+      const dequeued = queue.dequeueNext()!;
+      queue.failTask(dequeued.id, "something went wrong");
+      expect(queue.getTask(dequeued.id)?.status).toBe(TaskStatus.Failed);
+
+      queue.resetTask(dequeued.id);
+      const reset = queue.getTask(dequeued.id)!;
+      expect(reset.status).toBe(TaskStatus.Pending);
+      expect(reset.retryCount).toBe(0);
+      expect(reset.error).toBeNull();
+    });
+
+    it("does not reset non-failed tasks", () => {
+      const task = makeTask();
+      queue.enqueue(task);
+      queue.resetTask(task.id); // task is Pending, not Failed — should be a no-op
+      expect(queue.getTask(task.id)?.status).toBe(TaskStatus.Pending);
     });
   });
 

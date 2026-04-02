@@ -11,6 +11,8 @@ import { TaskBatcher } from "./orchestrator/batcher";
 import { CostTracker } from "./orchestrator/cost-tracker";
 import { Orchestrator } from "./orchestrator/orchestrator";
 import { createTask } from "./orchestrator/task";
+import { Task } from "./orchestrator/task";
+import { LLMResponse } from "./llm/provider";
 import { TaggerModule } from "./modules/tagger/tagger";
 import { TagAuditModule } from "./modules/tagger/tag-audit";
 import { CandidateScorer } from "./modules/connections/scoring";
@@ -400,11 +402,18 @@ export default class AssistantPlugin extends Plugin {
     const titleWords = notePath.replace(/\.md$/, "").split(/[\s\-_\/]+/);
     const folder = notePath.includes("/") ? notePath.split("/").slice(0, -1).join("/") : "";
 
-    // Build vault word frequency map for TF-IDF
-    const vaultWordFreqs = new Map<string, number>();
+    // Cache all vault file contents once to avoid O(n²) reads
+    const vaultCache = new Map<string, { content: string; fm: Record<string, any> }>();
     for (const file of this.vaultService.getMarkdownFiles()) {
       const text = await this.vaultService.readNote(file.path);
-      if (!text) continue;
+      if (text === null) continue;
+      const fileFm = await this.vaultService.parseFrontmatter(file.path);
+      vaultCache.set(file.path, { content: text, fm: fileFm });
+    }
+
+    // Build vault word frequency map for TF-IDF from cache
+    const vaultWordFreqs = new Map<string, number>();
+    for (const { content: text } of vaultCache.values()) {
       const words = text.toLowerCase().replace(/[^a-z0-9\s-]/g, " ").split(/\s+/);
       for (const w of words) {
         if (w.length > 2) vaultWordFreqs.set(w, (vaultWordFreqs.get(w) ?? 0) + 1);
@@ -423,17 +432,17 @@ export default class AssistantPlugin extends Plugin {
 
     const sourceProfile = { path: notePath, tags: sourceTags, titleWords, keywords, folder, linkedPaths };
 
-    // Build profiles for all other notes
+    // Build profiles for all other notes from cache
     const candidateProfiles = [];
     for (const file of this.vaultService.getMarkdownFiles()) {
       if (file.path === notePath) continue;
-      const cFm = await this.vaultService.parseFrontmatter(file.path);
-      const cContent = await this.vaultService.readNote(file.path);
+      const cached = vaultCache.get(file.path);
+      if (!cached) continue;
       candidateProfiles.push({
         path: file.path,
-        tags: cFm.tags ?? [],
+        tags: cached.fm.tags ?? [],
         titleWords: file.basename.split(/[\s\-_]+/),
-        keywords: this.scorer.extractKeywords(cContent ?? "", vaultWordFreqs),
+        keywords: this.scorer.extractKeywords(cached.content, vaultWordFreqs),
         folder: file.path.includes("/") ? file.path.split("/").slice(0, -1).join("/") : "",
         linkedPaths: new Set<string>(),
       });
@@ -447,11 +456,11 @@ export default class AssistantPlugin extends Plugin {
 
     if (ranked.length === 0) return; // No candidates worth asking the LLM about
 
-    // Build prompt with candidate summaries
+    // Build prompt with candidate summaries from cache
     const candidateSummaries = [];
     for (const r of ranked) {
-      const cContent = await this.vaultService.readNote(r.profile.path);
-      const summary = (cContent ?? "").slice(0, 400); // First 100 words ≈ 400 chars
+      const cached = vaultCache.get(r.profile.path);
+      const summary = (cached?.content ?? "").slice(0, 400); // First 100 words ≈ 400 chars
       candidateSummaries.push({
         path: r.profile.path,
         title: r.profile.path.replace(/\.md$/, "").split("/").pop() ?? "",
@@ -581,7 +590,7 @@ export default class AssistantPlugin extends Plugin {
 
   // --- Task completion handlers ---
 
-  private async handleTaskCompleted(task: any, response: any): Promise<void> {
+  private async handleTaskCompleted(task: Task, response: LLMResponse): Promise<void> {
     switch (task.action) {
       case "tag-note":
         await this.handleTagResult(task, response);
@@ -599,24 +608,37 @@ export default class AssistantPlugin extends Plugin {
     await this.saveCostTracker();
   }
 
-  private async handleTagResult(task: any, response: any): Promise<void> {
-    const result = this.tagger.parseResponse(response.content);
-    if (!result || result.tags.length === 0) return;
+  private async handleTagResult(task: Task, response: LLMResponse): Promise<void> {
+    let suggestedTags: string[] | null = null;
+
+    if (task.payload._batchSize > 1) {
+      // Batch response — parse as batch and extract this note's tags
+      const batchResult = this.tagger.parseBatchResponse(task.payload._batchResponse);
+      if (batchResult) {
+        suggestedTags = batchResult[task.payload.notePath] ?? null;
+      }
+    } else {
+      // Single response
+      const result = this.tagger.parseResponse(response.content);
+      suggestedTags = result?.tags ?? null;
+    }
+
+    if (!suggestedTags || suggestedTags.length === 0) return;
 
     const notePath = task.payload.notePath;
     if (!this.vaultService.noteExists(notePath)) return;
 
     await this.vaultService.updateFrontmatter(notePath, {
-      "suggested-tags": result.tags,
+      "suggested-tags": suggestedTags,
     });
 
     showClickableNotice(
-      `${result.tags.length} tags suggested for ${notePath} — click to review`,
+      `${suggestedTags.length} tags suggested for ${notePath} — click to review`,
       () => {
         new SuggestionModal(
           this.app,
           `Suggested tags for ${notePath}`,
-          result.tags.map((t) => ({ label: t })),
+          suggestedTags!.map((t) => ({ label: t })),
           async (decision) => {
             const fm = await this.vaultService.parseFrontmatter(notePath);
             const existingTags = fm.tags ?? [];
@@ -642,7 +664,7 @@ export default class AssistantPlugin extends Plugin {
     );
   }
 
-  private async handleAuditResult(task: any, response: any): Promise<void> {
+  private async handleAuditResult(task: Task, response: LLMResponse): Promise<void> {
     const suggestions = this.tagAudit.parseAuditResponse(response.content);
     if (!suggestions || suggestions.length === 0) {
       showNotice("Tag audit complete — no changes suggested.");
@@ -718,7 +740,7 @@ export default class AssistantPlugin extends Plugin {
     ).open();
   }
 
-  private async handleConnectionResult(task: any, response: any): Promise<void> {
+  private async handleConnectionResult(task: Task, response: LLMResponse): Promise<void> {
     const suggestions = this.connections.parseResponse(response.content);
     if (!suggestions || suggestions.length === 0) return;
 
@@ -746,12 +768,9 @@ export default class AssistantPlugin extends Plugin {
             const relatedSection = this.connections.buildRelatedSection(acceptedSuggestions);
 
             // Append or merge with existing Related section
-            if (content.includes("## Related")) {
-              const updated = content.replace(
-                /\n## Related\n[\s\S]*?(?=\n## |$)/,
-                relatedSection,
-              );
-              await this.vaultService.writeNote(notePath, updated);
+            if (content.includes("\n## Related")) {
+              const beforeRelated = content.split("\n## Related")[0];
+              await this.vaultService.writeNote(notePath, beforeRelated + relatedSection);
             } else {
               await this.vaultService.writeNote(notePath, content + relatedSection);
             }
@@ -771,9 +790,7 @@ export default class AssistantPlugin extends Plugin {
     }
 
     for (const task of failed) {
-      task.status = "pending" as any;
-      task.retryCount = 0;
-      task.error = null;
+      this.orchestrator.queue.resetTask(task.id);
     }
 
     showNotice(`Retrying ${failed.length} failed tasks.`);

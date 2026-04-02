@@ -129,8 +129,10 @@ export class Orchestrator {
         });
       }
 
-      // Complete all tasks with the shared response
+      // Complete all tasks, attaching batch metadata so handlers can parse per-task results
       for (const task of batch.tasks) {
+        task.payload._batchResponse = response.content;
+        task.payload._batchSize = batch.tasks.length;
         this.config.queue.completeTask(task.id);
         this.config.onTaskCompleted(task, response);
       }

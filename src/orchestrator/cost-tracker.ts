@@ -103,6 +103,10 @@ export class CostTracker {
       cost,
       taskType: record.taskType,
     });
+
+    // Prune entries older than 30 days to prevent unbounded growth
+    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    this.state.history = this.state.history.filter((h) => h.timestamp > thirtyDaysAgo);
   }
 
   /** Check if an estimated cost would exceed the configured budgets. 0 means unlimited. */

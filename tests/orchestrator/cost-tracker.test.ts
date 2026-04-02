@@ -94,6 +94,51 @@ describe("CostTracker", () => {
     });
   });
 
+  describe("history pruning", () => {
+    it("removes history entries older than 30 days", () => {
+      // Record a usage with an artificially old timestamp by manipulating state
+      tracker.recordUsage({
+        model: "claude-haiku-4-5-20251001",
+        tokensIn: 100,
+        tokensOut: 50,
+        taskType: "tagger",
+      });
+
+      // Manually age the entry beyond 30 days
+      const state = (tracker as any).state;
+      state.history[0].timestamp = Date.now() - 31 * 24 * 60 * 60 * 1000;
+
+      // Record another usage — the prune runs after each recordUsage
+      tracker.recordUsage({
+        model: "claude-haiku-4-5-20251001",
+        tokensIn: 100,
+        tokensOut: 50,
+        taskType: "tagger",
+      });
+
+      // Only the recent entry should remain
+      expect(state.history).toHaveLength(1);
+    });
+
+    it("retains entries within 30 days", () => {
+      tracker.recordUsage({
+        model: "claude-haiku-4-5-20251001",
+        tokensIn: 100,
+        tokensOut: 50,
+        taskType: "tagger",
+      });
+      tracker.recordUsage({
+        model: "claude-haiku-4-5-20251001",
+        tokensIn: 100,
+        tokensOut: 50,
+        taskType: "tagger",
+      });
+
+      const state = (tracker as any).state;
+      expect(state.history).toHaveLength(2);
+    });
+  });
+
   describe("serialization", () => {
     it("serializes and deserializes state", () => {
       tracker.recordUsage({
