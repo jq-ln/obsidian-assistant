@@ -1,0 +1,9 @@
+{
+  "id": "obsidian-assistant",
+  "name": "AI Assistant",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "AI-powered vault assistant for tagging, connections, and productivity",
+  "author": "jqln",
+  "isDesktopOnly": true
+}

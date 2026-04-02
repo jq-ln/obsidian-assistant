@@ -1,0 +1,25 @@
+{
+  "name": "obsidian-assistant",
+  "version": "0.1.0",
+  "description": "AI assistant plugin for Obsidian",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [],
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.82.0",
+    "obsidian": "^1.12.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "builtin-modules": "^5.0.0",
+    "esbuild": "^0.27.7",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.2"
+  }
+}
