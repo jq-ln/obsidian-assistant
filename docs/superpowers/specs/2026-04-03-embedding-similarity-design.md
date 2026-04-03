@@ -303,6 +303,11 @@ Existing `extractKeywords` tests migrated from `scoring.test.ts`. Function signa
 
 All tests mock the HTTP boundary (embedding provider's fetch calls). All internal logic — store, scorer, keyword extraction — runs against real implementations. Consistent with the project's existing testing philosophy.
 
+## Known Limitations
+
+- **Word frequency drift on re-embed:** When a note is re-embedded after editing, old term counts are not subtracted — only new counts are added. Over time, heavily edited notes accumulate stale frequency entries. Frequencies are rebuilt correctly on a full re-index (startup with a cleared cache). A proper fix would store per-note term counts to enable subtraction, but is not worth the complexity now.
+- **Eager content reads on startup hash comparison:** The `onLayoutReady` pass reads every file's content to compute hashes for comparison against stored hashes. For large vaults, comparing against file `mtime` as a first pass (skipping reads for files whose mtime hasn't changed) would be faster. The embeddings JSON would need to store `mtime` alongside `contentHash` to enable this. Not a blocker for personal vaults but worth revisiting if startup time becomes an issue.
+
 ## What Is Not In Scope
 
 - Multiple embedding model support — hardcoded to nomic-embed-text

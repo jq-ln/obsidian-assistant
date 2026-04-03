@@ -949,13 +949,16 @@ Append to `tests/embeddings/store.test.ts` inside the `describe("EmbeddingStore"
       expect(freqs.get("attention")).toBe(1);
     });
 
-    it("removes word frequencies on note delete", async () => {
+    it("tracks frequencies before removal (freqs not decremented — known limitation)", async () => {
       await store.ensureEmbedding("note.md", "unique-word unique-word");
       expect(store.getWordFrequencies().get("unique-word")).toBe(2);
 
       store.remove("note.md");
-      // Word freqs are not decremented in the current implementation on remove.
-      // This test documents that limitation — a full rebuild on next startup fixes it.
+      // Known limitation: word freqs are not decremented on remove.
+      // They are rebuilt correctly on next startup from a cleared cache.
+      // Verify the vector is gone even though freqs persist.
+      expect(store.getVector("note.md")).toBeNull();
+      expect(store.getWordFrequencies().get("unique-word")).toBe(2);
     });
   });
 
