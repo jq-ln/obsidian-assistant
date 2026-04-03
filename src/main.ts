@@ -13,7 +13,10 @@ import { Task } from "./orchestrator/task";
 import { LLMResponse } from "./llm/provider";
 import { TaggerModule } from "./modules/tagger/tagger";
 import { TagAuditModule } from "./modules/tagger/tag-audit";
-import { CandidateScorer } from "./modules/connections/scoring";
+import { extractKeywords } from "./modules/connections/keyword-extractor";
+import { OllamaEmbeddingProvider } from "./embeddings/provider";
+import { EmbeddingStore, fnv1aHash } from "./embeddings/store";
+import { SimilarityScorer } from "./embeddings/similarity";
 import { ConnectionModule } from "./modules/connections/connections";
 import { TaskAggregator } from "./modules/dashboard/task-aggregator";
 import { HabitTracker } from "./modules/dashboard/habits";
@@ -32,7 +35,9 @@ export default class AssistantPlugin extends Plugin {
   private orchestrator!: Orchestrator;
   private tagger = new TaggerModule();
   private tagAudit = new TagAuditModule();
-  private scorer = new CandidateScorer();
+  private embeddingProvider!: OllamaEmbeddingProvider;
+  private embeddingStore!: EmbeddingStore;
+  private similarityScorer!: SimilarityScorer;
   private connections = new ConnectionModule();
   private taskAggregator = new TaskAggregator();
   private habitTracker = new HabitTracker();
@@ -54,9 +59,17 @@ export default class AssistantPlugin extends Plugin {
       this.settings.ollamaModel,
     );
 
+    this.embeddingProvider = new OllamaEmbeddingProvider(
+      this.settings.ollamaEndpoint,
+    );
+
     // Load persisted state
     const queue = await this.loadQueue();
     queue.recoverOnStartup();
+
+    // Load embedding store
+    this.embeddingStore = await this.loadEmbeddingStore();
+    this.similarityScorer = new SimilarityScorer(this.embeddingStore);
 
     const router = new TaskRouter(this.ollama);
     const batcher = new TaskBatcher({
@@ -166,6 +179,7 @@ export default class AssistantPlugin extends Plugin {
       this.app.vault.on("delete", (file) => {
         if (file instanceof TFile) {
           this.suggestionsStore.removeForNote(file.path);
+          this.embeddingStore.remove(file.path);
           this.saveSuggestionsStore();
           this.suggestionsPanel?.refresh();
         }
@@ -206,6 +220,25 @@ export default class AssistantPlugin extends Plugin {
   private async onLayoutReady(): Promise<void> {
     await this.initializeVaultFolder();
 
+    // Start background embedding index
+    const allFiles = this.vaultService.getMarkdownFiles();
+    const filesToIndex: Array<{ path: string }> = [];
+    for (const file of allFiles) {
+      if (file.path.startsWith(`${ASSISTANT_FOLDER}/`)) continue;
+      const content = await this.vaultService.readNote(file.path);
+      if (!content) continue;
+      const currentHash = fnv1aHash(content);
+      const storedHash = this.embeddingStore.getContentHash(file.path);
+      if (storedHash !== currentHash) {
+        filesToIndex.push({ path: file.path });
+      }
+    }
+    this.embeddingStore.startBackgroundIndex(
+      filesToIndex,
+      (path) => this.vaultService.readNote(path),
+      () => this.saveEmbeddingStore(),
+    );
+
     if (this.settings.autoTagOnStartup) {
       this.tagAllUntagged();
     }
@@ -233,6 +266,9 @@ export default class AssistantPlugin extends Plugin {
   async onunload(): Promise<void> {
     this.ankiAutoSuggestRef?.();
     this.ankiAutoSuggestRef = null;
+    this.embeddingStore.stopBackgroundIndex();
+    await this.embeddingStore.flush();
+    await this.saveEmbeddingStore();
     await this.saveQueue();
     await this.saveSuggestionsStore();
     for (const timer of this.debounceTimers.values()) {
@@ -251,6 +287,9 @@ export default class AssistantPlugin extends Plugin {
     this.ollama.updateConfig({
       endpoint: this.settings.ollamaEndpoint,
       model: this.settings.ollamaModel,
+    });
+    this.embeddingProvider.updateConfig({
+      endpoint: this.settings.ollamaEndpoint,
     });
     this.updateAnkiAutoSuggest();
   }
@@ -288,6 +327,23 @@ export default class AssistantPlugin extends Plugin {
     await this.vaultService.writeNote(
       `${ASSISTANT_FOLDER}/queue.json`,
       this.orchestrator.queue.serialize(),
+    );
+  }
+
+  // --- Embedding store persistence ---
+
+  private async loadEmbeddingStore(): Promise<EmbeddingStore> {
+    const content = await this.vaultService.readNote(`${ASSISTANT_FOLDER}/embeddings.json`);
+    if (content) {
+      try { return EmbeddingStore.deserialize(content, this.embeddingProvider); } catch { /* start fresh */ }
+    }
+    return new EmbeddingStore(this.embeddingProvider);
+  }
+
+  private async saveEmbeddingStore(): Promise<void> {
+    await this.vaultService.writeNote(
+      `${ASSISTANT_FOLDER}/embeddings.json`,
+      this.embeddingStore.serialize(),
     );
   }
 
@@ -374,8 +430,13 @@ export default class AssistantPlugin extends Plugin {
 
     this.debounceTimers.set(
       path,
-      setTimeout(() => {
+      setTimeout(async () => {
         this.debounceTimers.delete(path);
+        // Ensure embedding is fresh before tagging
+        const content = await this.vaultService.readNote(path);
+        if (content) {
+          try { await this.embeddingStore.ensureEmbedding(path, content); } catch { /* Ollama may be down */ }
+        }
         this.enqueueTagNote(path, TaskTrigger.Automatic);
       }, delayMs),
     );
@@ -497,80 +558,54 @@ export default class AssistantPlugin extends Plugin {
     }
   }
 
-  /** Score candidates and build prompt before enqueuing, so the orchestrator just does the LLM call. */
   private async enqueueConnectionScan(notePath: string, trigger: TaskTrigger): Promise<void> {
     const content = await this.vaultService.readNote(notePath);
     if (!content) return;
 
-    const fm = await this.vaultService.parseFrontmatter(notePath);
-    const sourceTags = fm.tags ?? [];
-    const titleWords = notePath.replace(/\.md$/, "").split(/[\s\-_\/]+/);
-    const folder = notePath.includes("/") ? notePath.split("/").slice(0, -1).join("/") : "";
-
-    // Cache all vault file contents once to avoid O(n²) reads
-    const vaultCache = new Map<string, { content: string; fm: Record<string, any> }>();
-    for (const file of this.vaultService.getMarkdownFiles()) {
-      const text = await this.vaultService.readNote(file.path);
-      if (text === null) continue;
-      const fileFm = await this.vaultService.parseFrontmatter(file.path);
-      vaultCache.set(file.path, { content: text, fm: fileFm });
+    // On-demand embed for the active note
+    try {
+      await this.embeddingStore.ensureEmbedding(notePath, content);
+    } catch {
+      showNotice("Connection scan skipped — Ollama unavailable.");
+      return;
     }
 
-    // Build vault word frequency map for TF-IDF from cache
-    const vaultWordFreqs = new Map<string, number>();
-    for (const { content: text } of vaultCache.values()) {
-      const words = text.toLowerCase().replace(/[^a-z0-9\s-]/g, " ").split(/\s+/);
-      for (const w of words) {
-        if (w.length > 2) vaultWordFreqs.set(w, (vaultWordFreqs.get(w) ?? 0) + 1);
-      }
-    }
-
-    const keywords = this.scorer.extractKeywords(content, vaultWordFreqs);
-
-    // Extract existing links from content
+    // Extract existing links to exclude
     const linkMatches = content.matchAll(/\[\[([^\]]+)\]\]/g);
     const linkedPaths = new Set<string>();
     for (const m of linkMatches) {
       linkedPaths.add(m[1] + ".md");
-      linkedPaths.add(m[1]); // handle both with and without .md
+      linkedPaths.add(m[1]);
     }
 
-    const sourceProfile = { path: notePath, tags: sourceTags, titleWords, keywords, folder, linkedPaths };
+    // Collect candidate paths (exclude source and already-linked)
+    const candidatePaths = this.vaultService.getMarkdownFiles()
+      .filter((f) => f.path !== notePath && !linkedPaths.has(f.path))
+      .map((f) => f.path);
 
-    // Build profiles for all other notes from cache
-    const candidateProfiles = [];
-    for (const file of this.vaultService.getMarkdownFiles()) {
-      if (file.path === notePath) continue;
-      const cached = vaultCache.get(file.path);
-      if (!cached) continue;
-      candidateProfiles.push({
-        path: file.path,
-        tags: cached.fm.tags ?? [],
-        titleWords: file.basename.split(/[\s\-_]+/),
-        keywords: this.scorer.extractKeywords(cached.content, vaultWordFreqs),
-        folder: file.path.includes("/") ? file.path.split("/").slice(0, -1).join("/") : "",
-        linkedPaths: new Set<string>(),
-      });
-    }
-
-    // Score and rank
-    const ranked = this.scorer.rankCandidates(sourceProfile, candidateProfiles, {
-      maxCandidates: 10,
-      minScore: 0.15,
+    // Rank by embedding similarity
+    const ranked = this.similarityScorer.rankCandidates(notePath, candidatePaths, {
+      topK: 10,
+      minScore: this.settings.connectionMinScore,
     });
 
-    if (ranked.length === 0) return; // No candidates worth asking the LLM about
+    if (ranked.length === 0) return;
 
-    // Build prompt with candidate summaries from cache
+    // Build prompt with keyword summaries for each candidate
+    const wordFreqs = this.embeddingStore.getWordFrequencies();
+    const fm = await this.vaultService.parseFrontmatter(notePath);
+    const sourceTags = fm.tags ?? [];
+
     const candidateSummaries = [];
     for (const r of ranked) {
-      const cached = vaultCache.get(r.profile.path);
-      const summary = (cached?.content ?? "").slice(0, 400); // First 100 words ≈ 400 chars
+      const candidateContent = await this.vaultService.readNote(r.path);
+      if (!candidateContent) continue;
+      const keywords = extractKeywords(candidateContent, wordFreqs);
       candidateSummaries.push({
-        path: r.profile.path,
-        title: r.profile.path.replace(/\.md$/, "").split("/").pop() ?? "",
-        tags: r.profile.tags,
-        summary,
+        path: r.path,
+        title: r.path.replace(/\.md$/, "").split("/").pop() ?? "",
+        tags: ((await this.vaultService.parseFrontmatter(r.path)).tags ?? []),
+        summary: candidateContent.slice(0, 400),
       });
     }
 
