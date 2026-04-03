@@ -46,8 +46,12 @@ export class SuggestionsStore {
   }
 
   getForNote(notePath: string): Suggestion[] {
+    const noteNormalized = notePath.replace(/\.md$/, "");
     return Array.from(this.suggestions.values()).filter(
-      (s) => s.sourceNotePath === notePath && s.status === "pending",
+      (s) =>
+        s.status === "pending" &&
+        (s.sourceNotePath === notePath ||
+          (s.type === "connection" && s.title === noteNormalized)),
     );
   }
 

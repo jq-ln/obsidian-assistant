@@ -25,7 +25,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   autoTagOnStartup: true,
   autoConnectionScan: true,
   connectionScanIntervalMin: 30,
-  connectionMinScore: 0.5,
+  connectionMinScore: 0.65,
   autoDashboardRefresh: true,
   dashboardRefreshIntervalHours: 2,
   ankiEnabled: false,

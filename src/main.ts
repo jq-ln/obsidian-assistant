@@ -873,8 +873,14 @@ export default class AssistantPlugin extends Plugin {
     const notePath = task.payload.notePath;
     if (!this.vaultService.noteExists(notePath)) return;
 
+    let added = 0;
     for (const conn of suggestions) {
-      const linkName = conn.path.replace(/\.md$/, "");
+      // Skip self-links
+      const connNormalized = conn.path.replace(/\.md$/, "");
+      const sourceNormalized = notePath.replace(/\.md$/, "");
+      if (connNormalized === sourceNormalized) continue;
+
+      const linkName = connNormalized;
       const sug = createSuggestion({
         type: "connection",
         sourceNotePath: notePath,
@@ -882,11 +888,14 @@ export default class AssistantPlugin extends Plugin {
         detail: conn.reason,
       });
       this.suggestionsStore.add(sug);
+      added++;
     }
+
+    if (added === 0) return;
 
     await this.saveSuggestionsStore();
     this.suggestionsPanel?.refresh();
-    showNotice(`${suggestions.length} connection suggestions — check the panel`);
+    showNotice(`${added} connection suggestions — check the panel`);
   }
 
   private retryFailedTasks(): void {

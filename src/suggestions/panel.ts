@@ -165,16 +165,41 @@ export class SuggestionsPanel extends ItemView {
     row.style.border = "1px solid var(--background-modifier-border)";
     row.style.borderRadius = "4px";
 
-    // Title (clickable → navigate to source note)
-    const titleEl = row.createEl("div", { text: suggestion.title });
-    titleEl.style.fontWeight = "500";
-    titleEl.style.cursor = "pointer";
-    titleEl.addEventListener("click", () => {
-      const file = this.app.vault.getAbstractFileByPath(suggestion.sourceNotePath);
-      if (file) {
+    // Title line — for connections, show both notes
+    if (suggestion.type === "connection") {
+      const sourceName = suggestion.sourceNotePath.replace(/\.md$/, "").split("/").pop() ?? "";
+      const targetName = suggestion.title.split("/").pop() ?? "";
+      const linkLine = row.createDiv();
+      linkLine.style.fontWeight = "500";
+      linkLine.style.display = "flex";
+      linkLine.style.gap = "4px";
+      linkLine.style.alignItems = "center";
+
+      const sourceLink = linkLine.createEl("span", { text: sourceName });
+      sourceLink.style.cursor = "pointer";
+      sourceLink.style.textDecoration = "underline";
+      sourceLink.style.textDecorationStyle = "dotted";
+      sourceLink.addEventListener("click", () => {
         this.app.workspace.openLinkText(suggestion.sourceNotePath, "");
-      }
-    });
+      });
+
+      linkLine.createEl("span", { text: " ↔ " });
+
+      const targetLink = linkLine.createEl("span", { text: targetName });
+      targetLink.style.cursor = "pointer";
+      targetLink.style.textDecoration = "underline";
+      targetLink.style.textDecorationStyle = "dotted";
+      targetLink.addEventListener("click", () => {
+        this.app.workspace.openLinkText(suggestion.title, "");
+      });
+    } else {
+      const titleEl = row.createEl("div", { text: suggestion.title });
+      titleEl.style.fontWeight = "500";
+      titleEl.style.cursor = "pointer";
+      titleEl.addEventListener("click", () => {
+        this.app.workspace.openLinkText(suggestion.sourceNotePath, "");
+      });
+    }
 
     // Detail
     if (suggestion.detail) {

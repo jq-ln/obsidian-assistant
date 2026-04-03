@@ -28,7 +28,14 @@ export class ConnectionModule {
       )
       .join("\n\n");
 
-    const prompt = `Analyze whether any of the candidate notes are meaningfully related to the source note. Return only strong, non-obvious connections — not just surface-level keyword overlap.
+    const prompt = `Decide which candidate notes, if any, are meaningfully related to the source note.
+
+Rules:
+- A connection must be specific and substantive — shared topic, shared concept, or one note extending/contradicting the other.
+- Generic similarities do NOT count: "both discuss personal development", "both use structured formats", "both contain templates" are NOT connections.
+- Code examples, templates, and syntax-only notes rarely have meaningful connections to prose notes. When the source note is primarily code or a template, it is very likely that NONE of the candidates are related.
+- If a candidate is only related through vague thematic overlap, do NOT include it.
+- Returning an empty list is the correct answer when no strong connections exist. Most notes are not meaningfully connected.
 
 ## Source note: "${input.sourceTitle}"
 Tags: ${input.sourceTags.join(", ") || "none"}
@@ -37,12 +44,12 @@ ${input.sourceSummary}
 ## Candidates
 ${candidateList}
 
-Respond with JSON: {"connections": [{"path": "note.md", "reason": "one sentence explaining the connection"}]}
-If none are meaningfully related, return: {"connections": []}`;
+Respond with JSON only: {"connections": [{"path": "note.md", "reason": "one sentence explaining the specific connection"}]}
+If none are meaningfully related (this is common), return: {"connections": []}`;
 
     return {
       system:
-        "You are a knowledge graph assistant. You identify meaningful connections between notes in a knowledge vault. Only suggest strong connections. Always respond with valid JSON only.",
+        "You are a knowledge graph assistant. You identify meaningful connections between notes in a personal vault. Precision matters more than recall — only suggest connections you are confident about. Returning an empty list is preferred over suggesting weak connections. Always respond with valid JSON only.",
       prompt,
       maxTokens: 500,
       temperature: 0.2,
