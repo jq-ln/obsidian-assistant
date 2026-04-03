@@ -52,6 +52,9 @@ export class Vault {
     // No-op in tests — parent folders are not required
   }
 
+  on(_event: string, _callback: (...args: any[]) => any): any { return { id: 0 }; }
+  off(_event: string, _callback: (...args: any[]) => any): void {}
+
   _seed(path: string, content: string): void {
     this.files.set(path, content);
   }

@@ -198,8 +198,13 @@ export class SuggestionsPanel extends ItemView {
     acceptBtn.style.fontSize = "0.8em";
     acceptBtn.addClass("mod-cta");
     acceptBtn.addEventListener("click", async () => {
-      await this.handler.onAccept(suggestion);
-      this.store.accept(suggestion.id);
+      try {
+        await this.handler.onAccept(suggestion);
+        this.store.accept(suggestion.id);
+      } catch (e: any) {
+        const { Notice } = await import("obsidian");
+        new Notice(`Failed to accept suggestion: ${e.message ?? e}`);
+      }
       this.refresh();
     });
 

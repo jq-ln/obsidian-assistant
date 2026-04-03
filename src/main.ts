@@ -42,6 +42,7 @@ export default class AssistantPlugin extends Plugin {
   private debounceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
   private ankiModule = new AnkiModule();
   private cardMigration!: CardMigration;
+  private ankiAutoSuggestRef: (() => void) | null = null;
   private suggestionsStore!: SuggestionsStore;
   private suggestionsPanel: SuggestionsPanel | null = null;
 
@@ -183,6 +184,17 @@ export default class AssistantPlugin extends Plugin {
       ),
     );
 
+    // Clean up suggestions when notes are deleted
+    this.registerEvent(
+      this.app.vault.on("delete", (file) => {
+        if (file instanceof TFile) {
+          this.suggestionsStore.removeForNote(file.path);
+          this.saveSuggestionsStore();
+          this.suggestionsPanel?.refresh();
+        }
+      }),
+    );
+
     // Auto-triggers
     if (this.settings.autoTagOnSave) {
       this.registerEvent(
@@ -208,15 +220,7 @@ export default class AssistantPlugin extends Plugin {
       );
     }
 
-    if (this.settings.ankiEnabled && this.settings.ankiAutoSuggestOnSave) {
-      this.registerEvent(
-        this.app.vault.on("modify", (file) => {
-          if (file instanceof TFile && file.extension === "md") {
-            this.debounceAnkiSuggest(file.path, 10000);
-          }
-        }),
-      );
-    }
+    this.updateAnkiAutoSuggest();
 
     if (this.settings.autoDashboardRefresh) {
       this.registerInterval(
@@ -264,6 +268,26 @@ export default class AssistantPlugin extends Plugin {
       claudeDailyBudget: this.settings.claudeDailyBudget,
       claudeMonthlyBudget: this.settings.claudeMonthlyBudget,
     });
+    this.updateAnkiAutoSuggest();
+  }
+
+  private updateAnkiAutoSuggest(): void {
+    if (this.settings.ankiEnabled && this.settings.ankiAutoSuggestOnSave) {
+      if (!this.ankiAutoSuggestRef) {
+        const handler = (file: any) => {
+          if (file instanceof TFile && file.extension === "md") {
+            this.debounceAnkiSuggest(file.path, 10000);
+          }
+        };
+        this.app.vault.on("modify", handler);
+        this.ankiAutoSuggestRef = () => this.app.vault.off("modify", handler);
+      }
+    } else {
+      if (this.ankiAutoSuggestRef) {
+        this.ankiAutoSuggestRef();
+        this.ankiAutoSuggestRef = null;
+      }
+    }
   }
 
   // --- Queue / Cost persistence ---
@@ -718,9 +742,6 @@ export default class AssistantPlugin extends Plugin {
       case "suggest-cards":
         await this.handleAnkiResult(task, response);
         break;
-      case "migrate-cards":
-        await this.handleCardMigration(task);
-        break;
     }
 
     // Persist state after each completion
@@ -1090,27 +1111,19 @@ export default class AssistantPlugin extends Plugin {
 
   // --- Card migration ---
 
-  private queueCardMigration(oldLocation: string, newLocation: string): void {
-    const task = createTask({
-      type: "anki",
-      action: "migrate-cards",
-      payload: { from: oldLocation, to: newLocation },
-      modelRequirement: ModelRequirement.LocalOnly,
-      trigger: TaskTrigger.Manual,
-    });
-    this.orchestrator.queue.enqueue(task);
-    showNotice("Card migration queued. Cards will be moved in the background.");
+  private async queueCardMigration(oldLocation: string, newLocation: string): Promise<void> {
+    showNotice("Migrating cards...");
+    await this.handleCardMigration(newLocation);
   }
 
-  private async handleCardMigration(task: Task): Promise<void> {
-    const { to } = task.payload;
+  private async handleCardMigration(toLocation: string): Promise<void> {
     const cardsFolder = `${ASSISTANT_FOLDER}/cards`;
     const files = this.vaultService.getMarkdownFiles();
 
     for (const file of files) {
-      if (file.path.startsWith(`${ASSISTANT_FOLDER}/`)) continue; // Skip plugin files
+      if (file.path.startsWith(`${ASSISTANT_FOLDER}/`)) continue;
 
-      if (to === "separate-file") {
+      if (toLocation === "separate-file") {
         await this.cardMigration.migrateToSeparateFile(file.path, cardsFolder);
       } else {
         await this.cardMigration.migrateToInNote(file.path, cardsFolder);

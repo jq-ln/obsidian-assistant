@@ -1,5 +1,3 @@
-import { SCHEMA_VERSION } from "../types";
-
 export type SuggestionType = "tag" | "connection" | "anki-card";
 export type SuggestionStatus = "pending" | "accepted" | "dismissed";
 
