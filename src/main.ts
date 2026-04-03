@@ -268,7 +268,6 @@ export default class AssistantPlugin extends Plugin {
     this.ankiAutoSuggestRef = null;
     this.embeddingStore.stopBackgroundIndex();
     await this.embeddingStore.flush();
-    await this.saveEmbeddingStore();
     await this.saveQueue();
     await this.saveSuggestionsStore();
     for (const timer of this.debounceTimers.values()) {
@@ -605,6 +604,7 @@ export default class AssistantPlugin extends Plugin {
         path: r.path,
         title: r.path.replace(/\.md$/, "").split("/").pop() ?? "",
         tags: ((await this.vaultService.parseFrontmatter(r.path)).tags ?? []),
+        keywords,
         summary: candidateContent.slice(0, 400),
       });
     }

@@ -74,7 +74,7 @@ FNV-1a hash over the note content string. Fast, no dependencies, collision-resis
   2. If path is in `indexingInProgress`, await the existing promise from `pendingEmbeds` and return its result.
   3. Otherwise: add to `indexingInProgress`, create a promise that calls `provider.embed(content)`, store in `pendingEmbeds`. On resolution: validate vector dimensions (`vector.length !== 768` → discard and throw), store the vector + hash, update word frequencies incrementally, remove from `indexingInProgress` and `pendingEmbeds`, mark dirty. The promise resolves with the `Float32Array`.
 - `getWordFrequencies(): Map<string, number>` — returns the cached word frequency map for `extractKeywords`.
-- `remove(path: string): void` — called on note delete. Removes from all maps, subtracts word frequencies, marks dirty.
+- `remove(path: string): void` — called on note delete. Removes the embedding entry, marks dirty. Does not subtract word frequencies (see Known Limitations — word frequency drift).
 - `serialize(): string` — JSON string for persistence.
 - `static deserialize(json: string, provider: EmbeddingProvider): EmbeddingStore` — restores from JSON. Converts plain number arrays to `Float32Array`.
 - `startBackgroundIndex(files: Array<{ path: string }>): void` — called after layout ready. Kicks off the background loop. Content is read lazily on each tick when the note is actually processed, not upfront — reading all content during `onLayoutReady` would defeat the O(n^2) improvement.

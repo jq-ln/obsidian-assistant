@@ -9,6 +9,7 @@ export interface ConnectionPromptInput {
     path: string;
     title: string;
     tags: string[];
+    keywords: string[];
     summary: string;
   }>;
 }
@@ -23,7 +24,7 @@ export class ConnectionModule {
     const candidateList = input.candidates
       .map(
         (c) =>
-          `### ${c.path} — "${c.title}"\nTags: ${c.tags.join(", ") || "none"}\n${c.summary}`,
+          `### ${c.path} — "${c.title}"\nTags: ${c.tags.join(", ") || "none"}\nKey concepts: ${c.keywords.join(", ") || "none"}\n${c.summary}`,
       )
       .join("\n\n");
 

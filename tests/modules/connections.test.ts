@@ -16,8 +16,8 @@ describe("ConnectionModule", () => {
         sourceTags: ["ai", "ml"],
         sourceSummary: "Deep learning architectures...",
         candidates: [
-          { path: "backprop.md", title: "Backpropagation", tags: ["ai", "calculus"], summary: "Chain rule applied to neural nets..." },
-          { path: "cooking.md", title: "Pasta Recipe", tags: ["cooking"], summary: "How to make pasta..." },
+          { path: "backprop.md", title: "Backpropagation", tags: ["ai", "calculus"], keywords: ["gradient", "chain-rule"], summary: "Chain rule applied to neural nets..." },
+          { path: "cooking.md", title: "Pasta Recipe", tags: ["cooking"], keywords: ["pasta", "tomato"], summary: "How to make pasta..." },
         ],
       });
 
