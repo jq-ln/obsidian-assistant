@@ -3,6 +3,21 @@ import { EmbeddingProvider } from "./provider";
 
 const EXPECTED_DIMENSIONS = 768;
 
+const STOP_WORDS = new Set([
+  "the", "is", "a", "an", "and", "or", "but", "not", "for", "nor",
+  "so", "yet", "both", "either", "neither", "if", "then", "else",
+  "when", "while", "as", "at", "by", "in", "of", "on", "to", "up",
+  "it", "its", "be", "was", "were", "are", "has", "had", "have",
+  "do", "did", "does", "will", "would", "could", "should", "may",
+  "might", "shall", "can", "this", "that", "these", "those", "with",
+  "from", "into", "onto", "upon", "about", "above", "after", "again",
+  "also", "any", "been", "before", "between", "each", "few", "more",
+  "most", "no", "other", "our", "out", "own", "same", "some", "such",
+  "than", "their", "them", "then", "there", "they", "through", "too",
+  "under", "until", "very", "was", "we", "what", "which", "who",
+  "whom", "why", "your", "you",
+]);
+
 export function fnv1aHash(str: string): string {
   let hash = 0x811c9dc5;
   for (let i = 0; i < str.length; i++) {
@@ -37,7 +52,7 @@ export class EmbeddingStore {
   isInitialIndexComplete = false;
   private consecutiveFailures = 0;
   private pausedUntil = 0;
-  private intervalId: number | null = null;
+  private intervalId: ReturnType<typeof setInterval> | null = null;
   private persistTimeout: ReturnType<typeof setTimeout> | null = null;
   private onPersist: (() => Promise<void>) | null = null;
 
@@ -115,7 +130,7 @@ export class EmbeddingStore {
       .toLowerCase()
       .replace(/[^a-z0-9\s-]/g, " ")
       .split(/\s+/)
-      .filter((w) => w.length > 2);
+      .filter((w) => w.length > 2 && !STOP_WORDS.has(w));
 
     const newCounts = new Map<string, number>();
     for (const w of newWords) {
@@ -151,12 +166,12 @@ export class EmbeddingStore {
       return;
     }
 
-    this.intervalId = window.setInterval(() => this.backgroundTick(), 2000);
+    this.intervalId = setInterval(() => this.backgroundTick(), 2000);
   }
 
   stopBackgroundIndex(): void {
     if (this.intervalId !== null) {
-      window.clearInterval(this.intervalId);
+      clearInterval(this.intervalId);
       this.intervalId = null;
     }
     if (this.persistTimeout !== null) {
@@ -182,7 +197,7 @@ export class EmbeddingStore {
     if (this.indexPointer >= this.filesToIndex.length) {
       this.isInitialIndexComplete = true;
       if (this.intervalId !== null) {
-        window.clearInterval(this.intervalId);
+        clearInterval(this.intervalId);
         this.intervalId = null;
       }
       return;
