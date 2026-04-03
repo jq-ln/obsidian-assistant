@@ -8,6 +8,7 @@ export interface PluginSettings {
   autoTagOnStartup: boolean;
   autoConnectionScan: boolean;
   connectionScanIntervalMin: number;
+  connectionMinScore: number;
   autoDashboardRefresh: boolean;
   dashboardRefreshIntervalHours: number;
   ankiEnabled: boolean;
@@ -24,6 +25,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   autoTagOnStartup: true,
   autoConnectionScan: true,
   connectionScanIntervalMin: 30,
+  connectionMinScore: 0.5,
   autoDashboardRefresh: true,
   dashboardRefreshIntervalHours: 2,
   ankiEnabled: false,
@@ -139,6 +141,20 @@ export class AssistantSettingTab extends PluginSettingTab {
           .setDynamicTooltip()
           .onChange(async (value: number) => {
             this.settings.connectionScanIntervalMin = value;
+            await this.save();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Connection similarity threshold")
+      .setDesc("Minimum similarity score for connection suggestions. Higher = fewer but more relevant.")
+      .addSlider((slider) =>
+        (slider as any)
+          .setLimits(0.3, 0.9, 0.05)
+          .setValue(this.settings.connectionMinScore)
+          .setDynamicTooltip()
+          .onChange(async (value: number) => {
+            this.settings.connectionMinScore = value;
             await this.save();
           }),
       );
