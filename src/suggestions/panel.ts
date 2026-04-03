@@ -13,6 +13,7 @@ export class SuggestionsPanel extends ItemView {
   private store: SuggestionsStore;
   private handler: SuggestionHandler;
   private setupGuideHtml: string | null = null;
+  private expandedGroups = new Set<SuggestionType>();
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -112,7 +113,10 @@ export class SuggestionsPanel extends ItemView {
 
     for (const { type, label } of types) {
       const count = counts[type];
-      if (count === 0) continue;
+      if (count === 0) {
+        this.expandedGroups.delete(type);
+        continue;
+      }
 
       const group = container.createDiv({ cls: "suggestion-group" });
       const header = group.createDiv({ cls: "suggestion-group-header" });
@@ -132,10 +136,17 @@ export class SuggestionsPanel extends ItemView {
       badge.style.fontSize = "0.8em";
 
       const body = group.createDiv({ cls: "suggestion-group-body" });
-      body.style.display = "none"; // Collapsed by default
+      const isExpanded = this.expandedGroups.has(type);
+      body.style.display = isExpanded ? "block" : "none";
 
       header.addEventListener("click", () => {
-        body.style.display = body.style.display === "none" ? "block" : "none";
+        const opening = body.style.display === "none";
+        body.style.display = opening ? "block" : "none";
+        if (opening) {
+          this.expandedGroups.add(type);
+        } else {
+          this.expandedGroups.delete(type);
+        }
       });
 
       const suggestions = this.store.getByType(type).filter(
