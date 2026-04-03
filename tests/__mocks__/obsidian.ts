@@ -48,6 +48,10 @@ export class Vault {
     return files;
   }
 
+  async createFolder(_path: string): Promise<void> {
+    // No-op in tests — parent folders are not required
+  }
+
   _seed(path: string, content: string): void {
     this.files.set(path, content);
   }
