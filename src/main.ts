@@ -1021,9 +1021,13 @@ export default class AssistantPlugin extends Plugin {
 
   private async dismissTagSuggestion(suggestion: Suggestion): Promise<void> {
     const fm = await this.vaultService.parseFrontmatter(suggestion.sourceNotePath);
-    const existingRejected = fm["rejected-tags"] ?? [];
+    const existingRejected: string[] = fm["rejected-tags"] ?? [];
+    const suggestedTags: string[] = fm["suggested-tags"] ?? [];
+    const remainingSuggested = suggestedTags.filter(t => t !== suggestion.title);
+
     await this.vaultService.updateFrontmatter(suggestion.sourceNotePath, {
       "rejected-tags": [...existingRejected, suggestion.title],
+      "suggested-tags": remainingSuggested.length > 0 ? remainingSuggested : undefined,
     });
   }
 
