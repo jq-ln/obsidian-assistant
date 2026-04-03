@@ -36,7 +36,7 @@ The answer is {{c1::42}}.
       expect(updatedNote).toContain("Some content.");
 
       // Separate file should have the cards
-      const cardFile = await vault.readNote("AI-Assistant/cards/my-note-cards.md");
+      const cardFile = await vault.readNote("AI-Assistant/cards/notes-my-note-cards.md");
       expect(cardFile).toContain("Q1::A1");
       expect(cardFile).toContain("{{c1::42}}");
     });
@@ -55,7 +55,7 @@ The answer is {{c1::42}}.
     it("moves cards from separate file back into the note", async () => {
       app.vault._seed("notes/my-note.md", "# My Note\n\nSome content.");
       app.vault._seed(
-        "AI-Assistant/cards/my-note-cards.md",
+        "AI-Assistant/cards/notes-my-note-cards.md",
         "## Flashcards\n\nQ1::A1\n\nQ2::A2\n",
       );
 
@@ -67,7 +67,7 @@ The answer is {{c1::42}}.
       expect(content).toContain("Q1::A1");
 
       // Separate file should be removed (content cleared)
-      const cardFile = await vault.readNote("AI-Assistant/cards/my-note-cards.md");
+      const cardFile = await vault.readNote("AI-Assistant/cards/notes-my-note-cards.md");
       expect(cardFile === null || cardFile.trim() === "").toBe(true);
     });
 
@@ -82,9 +82,9 @@ The answer is {{c1::42}}.
   });
 
   describe("getCardFilePath", () => {
-    it("generates correct card file path", () => {
+    it("generates correct card file path with folder prefix", () => {
       expect(migration.getCardFilePath("notes/my-note.md", "AI-Assistant/cards")).toBe(
-        "AI-Assistant/cards/my-note-cards.md",
+        "AI-Assistant/cards/notes-my-note-cards.md",
       );
     });
 
@@ -92,6 +92,14 @@ The answer is {{c1::42}}.
       expect(migration.getCardFilePath("my-note.md", "AI-Assistant/cards")).toBe(
         "AI-Assistant/cards/my-note-cards.md",
       );
+    });
+
+    it("handles deeply nested notes without collisions", () => {
+      const path1 = migration.getCardFilePath("notes/physics/intro.md", "cards");
+      const path2 = migration.getCardFilePath("notes/math/intro.md", "cards");
+      expect(path1).not.toBe(path2);
+      expect(path1).toBe("cards/notes-physics-intro-cards.md");
+      expect(path2).toBe("cards/notes-math-intro-cards.md");
     });
   });
 });

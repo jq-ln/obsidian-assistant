@@ -1048,7 +1048,7 @@ export default class AssistantPlugin extends Plugin {
     const remainingSuggested = suggestedTags.filter(t => t !== suggestion.title);
 
     await this.vaultService.updateFrontmatter(suggestion.sourceNotePath, {
-      tags: [...existingTags, suggestion.title],
+      tags: [...new Set([...existingTags, suggestion.title])],
       "suggested-tags": remainingSuggested.length > 0 ? remainingSuggested : undefined,
       "ai-tagged": true,
     });

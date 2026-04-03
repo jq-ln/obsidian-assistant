@@ -10,8 +10,9 @@ export class CardMigration {
   }
 
   getCardFilePath(notePath: string, cardsFolder: string): string {
-    const basename = notePath.split("/").pop()?.replace(/\.md$/, "") ?? "unknown";
-    return `${cardsFolder}/${basename}-cards.md`;
+    const withoutExt = notePath.replace(/\.md$/, "");
+    const safeName = withoutExt.replace(/\//g, "-");
+    return `${cardsFolder}/${safeName}-cards.md`;
   }
 
   async migrateToSeparateFile(notePath: string, cardsFolder: string): Promise<void> {
