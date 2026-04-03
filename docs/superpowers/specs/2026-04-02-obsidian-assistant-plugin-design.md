@@ -363,6 +363,7 @@ Each error scenario has a defined behavior — no silent failures.
 | **Claude rate limit (429)** | Pause queue processing for the duration indicated by `retry-after` header (or 60s default). Notify user: "Claude rate limited — pausing for Ns." Resume automatically. |
 | **Claude auth error (401)** | Pause all Claude tasks. Notify user: "API key invalid or expired — check plugin settings." Do not retry. |
 | **Claude server error (5xx)** | Retry up to maxRetries with exponential backoff (1s, 4s, 16s). If all retries fail, mark task as failed. |
+| **Ollama request timeout** | Health checks timeout after 5s, generation requests after 120s. AbortController cancels the fetch. Timeout treated as provider unavailable — cache invalidated, task follows normal deferral/fallback logic. |
 | **Ollama unavailable (connection refused)** | Mark provider as unavailable (cached 30s). For `local-preferred` tasks: check user fallback setting. For `local-only` tasks: defer. |
 | **Note deleted between task creation and execution** | Detect missing file before LLM call. Silently discard the task (status: `completed` with a note that the source was deleted). |
 | **Vault file locked by another plugin** | Retry write after 2s, up to 3 attempts. If still locked, mark task as failed: "Could not write to [note] — file locked." |
@@ -370,6 +371,74 @@ Each error scenario has a defined behavior — no silent failures.
 | **Cost budget exceeded mid-batch** | Complete the current LLM call (already in-flight). Defer remaining tasks in the batch. Notify user. |
 
 Failed tasks are surfaced in the dashboard and can be retried manually via command palette "Retry failed tasks."
+
+## Performance: Connection Scoring Cache
+
+### Problem
+
+Connection discovery rebuilds the vault-wide word frequency map on every scan invocation. For a vault-wide scan, each note triggers a full O(n) pass over all files to build the map, making the overall cost O(n²). This is acceptable for small vaults but will degrade as the vault grows.
+
+### Solution: Incremental Cache
+
+Persist the word frequency map and invalidate incrementally:
+
+1. **Build once** — on first scan or plugin startup, build the vault-wide word frequency map and persist it to `AI-Assistant/word-freq-cache.json` with a per-file content hash.
+2. **On note save** — diff only the changed note's terms against the cached map. Subtract the old note's term counts, add the new note's term counts, update the content hash.
+3. **On note delete** — subtract the deleted note's term counts from the map.
+4. **Cache format** — `{ schemaVersion: 1, fileHashes: { [path]: string }, freqs: { [word]: number } }`. The file hashes allow detection of files that changed while the plugin was unloaded.
+5. **Invalidation** — on startup, compare stored file hashes against current `mtime` values. Re-index only changed files.
+
+This reduces the per-scan cost from O(n) to O(1) for the frequency map (amortized), with the full rebuild only happening on first run or cache corruption.
+
+### Scored Pair Cache (Optional Extension)
+
+Store TF-IDF similarity scores between note pairs. Recompute only when either note changes. This avoids re-scoring the entire candidate set on each scan. The cache key is `hash(noteA) + hash(noteB)` — if either hash changes, the pair is invalidated.
+
+This is a secondary optimization — the frequency map cache eliminates the dominant cost.
+
+## Future: Embedding-Based Similarity
+
+### Motivation
+
+TF-IDF catches lexical overlap but misses semantic connections. "Chased by a figure" and "pursuit anxiety" share no keywords but are thematically related. An embedding model maps text into a vector space where semantic similarity is captured by cosine distance.
+
+### Architecture
+
+The connection module already produces a numeric score per candidate pair. Embeddings fit as an additional scoring signal alongside TF-IDF, not a replacement.
+
+```typescript
+interface SimilarityProvider {
+  score(sourcePath: string, candidatePath: string): Promise<number>;
+  invalidate(filePath: string): void;
+}
+```
+
+Both the existing `CandidateScorer` (TF-IDF) and a future `EmbeddingSimilarity` provider implement this interface. The connection module combines their scores with configurable weights, allowing the user to tune the tradeoff between lexical and semantic matching.
+
+### Embedding Model
+
+Ollama supports embedding models via `/api/embed`. `nomic-embed-text` (137M parameters, 768-dimensional vectors) runs locally with minimal resource usage — suitable for background indexing without competing with the generation model.
+
+### Storage
+
+For a personal vault (sub-10k notes), in-memory on startup is sufficient:
+
+- Persist embeddings to `AI-Assistant/embeddings.json` as `{ [path]: { hash: string, vector: number[] } }`
+- On startup, load all vectors into a `Map<string, Float32Array>`
+- Cosine similarity is a simple dot product / magnitude calculation — no vector DB needed
+- Estimated storage: 768 floats × 4 bytes × 5,000 notes ≈ 15 MB on disk, ~15 MB in memory
+
+### Indexing Strategy
+
+- **Background indexing** — on plugin startup (after layout ready), queue embedding requests for notes missing from or outdated in the cache. Process at low priority, one note at a time, to avoid saturating Ollama.
+- **Incremental on save** — re-embed only the changed note. Update the vector in the persisted cache and in-memory map.
+- **No batch re-embedding** — the cost of embedding a single note (~100ms locally) makes incremental updates practical.
+
+### Not In Scope
+
+- Approximate nearest neighbor search (HNSW, IVF) — brute-force cosine similarity over <10k vectors is fast enough (sub-millisecond)
+- SQLite or external vector DB — adds a dependency for no practical gain at this scale
+- Embedding-based tagging or other features — embeddings are scoped to connection discovery only for now
 
 ## Testing Strategy
 

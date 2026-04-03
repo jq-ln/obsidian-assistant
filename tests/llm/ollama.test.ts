@@ -25,7 +25,10 @@ describe("OllamaProvider", () => {
       });
 
       expect(await provider.isAvailable()).toBe(true);
-      expect(mockFetch).toHaveBeenCalledWith("http://localhost:11434/api/tags");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "http://localhost:11434/api/tags",
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
     });
 
     it("returns false when Ollama is unreachable", async () => {
@@ -141,6 +144,42 @@ describe("OllamaProvider", () => {
       await expect(
         provider.complete({ system: "", prompt: "test", maxTokens: 100 }),
       ).rejects.toThrow("ECONNREFUSED");
+    });
+
+    it("passes abort signal to fetch", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          response: '{"tags": []}',
+          eval_count: 10,
+          prompt_eval_count: 20,
+        }),
+      });
+
+      await provider.complete({ system: "", prompt: "test", maxTokens: 100 });
+
+      const [, options] = mockFetch.mock.calls[0];
+      expect(options.signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it("throws timeout error when request is aborted", async () => {
+      const abortError = new Error("The operation was aborted");
+      abortError.name = "AbortError";
+      mockFetch.mockRejectedValueOnce(abortError);
+
+      await expect(
+        provider.complete({ system: "", prompt: "test", maxTokens: 100 }),
+      ).rejects.toThrow("Ollama request timed out");
+    });
+  });
+
+  describe("isAvailable timeout", () => {
+    it("returns false when health check times out", async () => {
+      const abortError = new Error("The operation was aborted");
+      abortError.name = "AbortError";
+      mockFetch.mockRejectedValueOnce(abortError);
+
+      expect(await provider.isAvailable()).toBe(false);
     });
   });
 });

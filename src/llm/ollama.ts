@@ -15,6 +15,8 @@ export class OllamaProvider implements LLMProvider {
   private cachedAvailable: boolean | null = null;
   private cacheTimestamp = 0;
   private readonly CACHE_TTL_MS = 30_000;
+  private readonly HEALTH_TIMEOUT_MS = 5_000;
+  private readonly REQUEST_TIMEOUT_MS = 120_000;
 
   constructor(endpoint: string, model: string) {
     this.endpoint = endpoint.replace(/\/$/, "");
@@ -39,8 +41,14 @@ export class OllamaProvider implements LLMProvider {
     }
 
     try {
-      const response = await fetch(`${this.endpoint}/api/tags`);
-      this.cachedAvailable = response.ok;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), this.HEALTH_TIMEOUT_MS);
+      try {
+        const response = await fetch(`${this.endpoint}/api/tags`, { signal: controller.signal });
+        this.cachedAvailable = response.ok;
+      } finally {
+        clearTimeout(timeoutId);
+      }
     } catch {
       this.cachedAvailable = false;
     }
@@ -56,12 +64,15 @@ export class OllamaProvider implements LLMProvider {
 
   async complete(request: LLMRequest): Promise<LLMResponse> {
     const startMs = Date.now();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.REQUEST_TIMEOUT_MS);
 
     let response: Response;
     try {
       response = await fetch(`${this.endpoint}/api/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           model: this.model,
           system: request.system,
@@ -74,10 +85,16 @@ export class OllamaProvider implements LLMProvider {
           },
         }),
       });
-    } catch (error) {
+    } catch (error: any) {
+      clearTimeout(timeoutId);
       this.invalidateCache();
+      if (error.name === "AbortError") {
+        throw new Error(`Ollama request timed out after ${this.REQUEST_TIMEOUT_MS / 1000}s`);
+      }
       throw error;
     }
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       this.invalidateCache();
