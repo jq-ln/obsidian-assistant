@@ -118,7 +118,7 @@ Suggest 3-8 cards depending on note complexity.`;
   }
 
   extractExistingCards(content: string): string[] {
-    const match = content.match(/## Flashcards\n\n([\s\S]*?)(?=\n## |\s*$)/);
+    const match = content.match(/## Flashcards\n+([\s\S]*?)(?=\n## |\s*$)/);
     if (!match) return [];
 
     return match[1]
@@ -131,9 +131,21 @@ Suggest 3-8 cards depending on note complexity.`;
     const newCards = newCardLines.join("\n\n");
 
     if (content.includes("## Flashcards")) {
-      // Append to existing section
-      const trimmed = content.replace(/\s*$/, "");
-      return `${trimmed}\n\n${newCards}\n`;
+      // Find end of Flashcards section (next ## heading or EOF)
+      const sectionStart = content.indexOf("## Flashcards");
+      const afterHeading = content.indexOf("\n", sectionStart) + 1;
+      const nextHeading = content.indexOf("\n## ", afterHeading);
+
+      if (nextHeading === -1) {
+        // Flashcards is the last section — append at end
+        const trimmed = content.replace(/\s*$/, "");
+        return `${trimmed}\n\n${newCards}\n`;
+      } else {
+        // Insert before the next heading
+        const before = content.slice(0, nextHeading).replace(/\s*$/, "");
+        const after = content.slice(nextHeading);
+        return `${before}\n\n${newCards}${after}`;
+      }
     }
 
     // Create new section

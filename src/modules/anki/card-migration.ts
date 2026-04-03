@@ -51,9 +51,19 @@ export class CardMigration {
   }
 
   private removeFlashcardsSection(content: string): string {
-    // Remove ## Flashcards and everything after it (it's always the last section)
     const idx = content.indexOf("\n## Flashcards");
     if (idx === -1) return content;
-    return content.slice(0, idx).replace(/\s+$/, "\n");
+
+    // Find the next ## heading after Flashcards
+    const afterHeading = content.indexOf("\n", idx + 1) + 1;
+    const nextHeading = content.indexOf("\n## ", afterHeading);
+
+    if (nextHeading === -1) {
+      // Flashcards is the last section — remove to end
+      return content.slice(0, idx).replace(/\s+$/, "\n");
+    } else {
+      // Remove just the Flashcards section, keep subsequent sections
+      return (content.slice(0, idx) + content.slice(nextHeading)).replace(/\n{3,}/g, "\n\n");
+    }
   }
 }

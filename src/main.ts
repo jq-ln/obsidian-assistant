@@ -233,6 +233,14 @@ export default class AssistantPlugin extends Plugin {
     this.registerInterval(
       window.setInterval(() => this.orchestrator.processNext(), 3000),
     );
+
+    // Cleanup resolved suggestions every hour
+    this.registerInterval(
+      window.setInterval(() => {
+        this.suggestionsStore.cleanup(24 * 60 * 60 * 1000);
+        this.saveSuggestionsStore();
+      }, 60 * 60 * 1000),
+    );
   }
 
   async onunload(): Promise<void> {
@@ -1014,10 +1022,15 @@ export default class AssistantPlugin extends Plugin {
 
   private async acceptTagSuggestion(suggestion: Suggestion): Promise<void> {
     const fm = await this.vaultService.parseFrontmatter(suggestion.sourceNotePath);
-    const existingTags = fm.tags ?? [];
+    const existingTags: string[] = fm.tags ?? [];
+    const suggestedTags: string[] = fm["suggested-tags"] ?? [];
+
+    // Remove just this tag from suggested-tags
+    const remainingSuggested = suggestedTags.filter(t => t !== suggestion.title);
+
     await this.vaultService.updateFrontmatter(suggestion.sourceNotePath, {
       tags: [...existingTags, suggestion.title],
-      "suggested-tags": undefined,
+      "suggested-tags": remainingSuggested.length > 0 ? remainingSuggested : undefined,
       "ai-tagged": true,
     });
   }
