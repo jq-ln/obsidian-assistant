@@ -24,6 +24,11 @@ export class VaultService {
         if (existing && existing instanceof TFile) {
           await this.app.vault.modify(existing, content);
         } else {
+          // Ensure parent folders exist before creating
+          const parentDir = normalized.substring(0, normalized.lastIndexOf("/"));
+          if (parentDir && !this.app.vault.getAbstractFileByPath(parentDir)) {
+            await this.app.vault.createFolder(parentDir);
+          }
           await this.app.vault.create(normalized, content);
         }
         return; // success

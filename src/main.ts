@@ -293,6 +293,8 @@ export default class AssistantPlugin extends Plugin {
     const fm = await this.vaultService.parseFrontmatter(path);
     // Skip if already has suggested-tags pending review
     if (fm["suggested-tags"]?.length > 0) return;
+    // Skip automatic re-tagging of notes that were already AI-tagged
+    if (trigger === TaskTrigger.Automatic && fm["ai-tagged"]) return;
 
     const existingTags = await this.vaultService.getAllTags();
     const rejectedTags = fm["rejected-tags"] ?? [];
