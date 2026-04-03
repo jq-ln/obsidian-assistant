@@ -1,14 +1,12 @@
 // src/main.ts
 import { Plugin, TFile, MarkdownView } from "obsidian";
 import { PluginSettings, DEFAULT_SETTINGS, AssistantSettingTab } from "./settings";
-import { ASSISTANT_FOLDER, DEFAULT_TAG_STYLE_GUIDE, ModelRequirement, TaskTrigger } from "./types";
+import { ASSISTANT_FOLDER, DEFAULT_TAG_STYLE_GUIDE, TaskTrigger } from "./types";
 import { OllamaProvider } from "./llm/ollama";
-import { ClaudeProvider } from "./llm/claude";
 import { VaultService } from "./vault/vault-service";
 import { TaskQueue } from "./orchestrator/queue";
 import { TaskRouter } from "./orchestrator/router";
 import { TaskBatcher } from "./orchestrator/batcher";
-import { CostTracker } from "./orchestrator/cost-tracker";
 import { Orchestrator } from "./orchestrator/orchestrator";
 import { createTask } from "./orchestrator/task";
 import { Task } from "./orchestrator/task";
@@ -21,7 +19,7 @@ import { TaskAggregator } from "./modules/dashboard/task-aggregator";
 import { HabitTracker } from "./modules/dashboard/habits";
 import { DashboardModule } from "./modules/dashboard/dashboard";
 import { SuggestionModal } from "./ui/suggestion-modal";
-import { showNotice, showCostWarning, showClickableNotice } from "./ui/notices";
+import { showNotice, showClickableNotice } from "./ui/notices";
 import { AnkiModule } from "./modules/anki/anki";
 import { CardMigration } from "./modules/anki/card-migration";
 import { SuggestionsStore } from "./suggestions/store";
@@ -46,7 +44,6 @@ export default class AssistantPlugin extends Plugin {
   private suggestionsStore!: SuggestionsStore;
   private suggestionsPanel: SuggestionsPanel | null = null;
   private ollama!: OllamaProvider;
-  private claude!: ClaudeProvider;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -56,21 +53,12 @@ export default class AssistantPlugin extends Plugin {
       this.settings.ollamaEndpoint,
       this.settings.ollamaModel,
     );
-    this.claude = new ClaudeProvider(
-      this.settings.claudeApiKey,
-      this.settings.claudeModel,
-    );
 
     // Load persisted state
     const queue = await this.loadQueue();
-    const costTracker = await this.loadCostTracker();
     queue.recoverOnStartup();
 
-    const router = new TaskRouter(
-      this.ollama,
-      this.claude,
-      this.settings.localFallbackToClaude,
-    );
+    const router = new TaskRouter(this.ollama);
     const batcher = new TaskBatcher({
       maxBatchSize: 10,
       contextWindowTokens: 8000,
@@ -80,16 +68,9 @@ export default class AssistantPlugin extends Plugin {
       queue,
       router,
       batcher,
-      costTracker,
-      providers: { ollama: this.ollama, claude: this.claude },
-      settings: {
-        claudeDailyBudget: this.settings.claudeDailyBudget,
-        claudeMonthlyBudget: this.settings.claudeMonthlyBudget,
-      },
       onTaskCompleted: (task, response) => this.handleTaskCompleted(task, response),
       onTaskFailed: (task, error) => showNotice(`Task failed: ${error}`),
       onTaskDeferred: (task, reason) => showNotice(`Task deferred: ${reason}`),
-      onCostWarning: (msg) => showCostWarning(msg),
     });
 
     // Load suggestions store
@@ -253,7 +234,6 @@ export default class AssistantPlugin extends Plugin {
     this.ankiAutoSuggestRef?.();
     this.ankiAutoSuggestRef = null;
     await this.saveQueue();
-    await this.saveCostTracker();
     await this.saveSuggestionsStore();
     for (const timer of this.debounceTimers.values()) {
       clearTimeout(timer);
@@ -268,14 +248,6 @@ export default class AssistantPlugin extends Plugin {
 
   private async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
-    this.orchestrator.updateSettings({
-      claudeDailyBudget: this.settings.claudeDailyBudget,
-      claudeMonthlyBudget: this.settings.claudeMonthlyBudget,
-    });
-    this.claude.updateConfig({
-      apiKey: this.settings.claudeApiKey,
-      model: this.settings.claudeModel,
-    });
     this.ollama.updateConfig({
       endpoint: this.settings.ollamaEndpoint,
       model: this.settings.ollamaModel,
@@ -302,7 +274,7 @@ export default class AssistantPlugin extends Plugin {
     }
   }
 
-  // --- Queue / Cost persistence ---
+  // --- Queue persistence ---
 
   private async loadQueue(): Promise<TaskQueue> {
     const content = await this.vaultService.readNote(`${ASSISTANT_FOLDER}/queue.json`);
@@ -316,21 +288,6 @@ export default class AssistantPlugin extends Plugin {
     await this.vaultService.writeNote(
       `${ASSISTANT_FOLDER}/queue.json`,
       this.orchestrator.queue.serialize(),
-    );
-  }
-
-  private async loadCostTracker(): Promise<CostTracker> {
-    const content = await this.vaultService.readNote(`${ASSISTANT_FOLDER}/usage.json`);
-    if (content) {
-      try { return CostTracker.deserialize(content); } catch { /* start fresh */ }
-    }
-    return new CostTracker();
-  }
-
-  private async saveCostTracker(): Promise<void> {
-    await this.vaultService.writeNote(
-      `${ASSISTANT_FOLDER}/usage.json`,
-      this.orchestrator.costTracker.serialize(),
     );
   }
 
@@ -466,7 +423,6 @@ export default class AssistantPlugin extends Plugin {
         prompt: prompt.prompt,
         maxTokens: prompt.maxTokens,
       },
-      modelRequirement: ModelRequirement.LocalPreferred,
       trigger,
     });
 
@@ -503,7 +459,6 @@ export default class AssistantPlugin extends Plugin {
         prompt: prompt.prompt,
         maxTokens: prompt.maxTokens,
       },
-      modelRequirement: ModelRequirement.ClaudeRequired,
       trigger: TaskTrigger.Manual,
     });
 
@@ -635,7 +590,6 @@ export default class AssistantPlugin extends Plugin {
         prompt: prompt.prompt,
         maxTokens: prompt.maxTokens,
       },
-      modelRequirement: ModelRequirement.LocalPreferred,
       trigger,
     });
 
@@ -758,7 +712,6 @@ export default class AssistantPlugin extends Plugin {
 
     // Persist state after each completion
     await this.saveQueue();
-    await this.saveCostTracker();
   }
 
   private async handleTagResult(task: Task, response: LLMResponse): Promise<void> {
@@ -948,7 +901,6 @@ export default class AssistantPlugin extends Plugin {
         prompt: prompt.prompt,
         maxTokens: prompt.maxTokens,
       },
-      modelRequirement: ModelRequirement.ClaudeRequired,
       trigger: TaskTrigger.Manual,
     });
 
@@ -992,7 +944,6 @@ export default class AssistantPlugin extends Plugin {
         prompt: prompt.prompt,
         maxTokens: prompt.maxTokens,
       },
-      modelRequirement: ModelRequirement.ClaudeRequired,
       trigger: TaskTrigger.Automatic,
     });
 

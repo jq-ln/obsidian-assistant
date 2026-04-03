@@ -1,5 +1,4 @@
 import {
-  ModelRequirement,
   TaskPriority,
   TaskStatus,
   TaskTrigger,
@@ -12,7 +11,6 @@ export interface Task {
   type: TaskType;
   action: TaskAction;
   payload: Record<string, any>;
-  modelRequirement: ModelRequirement;
   trigger: TaskTrigger;
   priority: TaskPriority;
   status: TaskStatus;
@@ -25,7 +23,7 @@ export interface Task {
 let nextId = 1;
 
 export function createTask(
-  params: Pick<Task, "type" | "action" | "payload" | "modelRequirement" | "trigger"> &
+  params: Pick<Task, "type" | "action" | "payload" | "trigger"> &
     Partial<Pick<Task, "priority" | "maxRetries">>,
 ): Task {
   return {
@@ -33,7 +31,6 @@ export function createTask(
     type: params.type,
     action: params.action,
     payload: params.payload,
-    modelRequirement: params.modelRequirement,
     trigger: params.trigger,
     priority:
       params.trigger === TaskTrigger.Manual

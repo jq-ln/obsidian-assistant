@@ -4,15 +4,13 @@ import { Orchestrator } from "@/orchestrator/orchestrator";
 import { TaskQueue } from "@/orchestrator/queue";
 import { TaskRouter } from "@/orchestrator/router";
 import { TaskBatcher } from "@/orchestrator/batcher";
-import { CostTracker } from "@/orchestrator/cost-tracker";
 import { TaggerModule } from "@/modules/tagger/tagger";
 import { createTask, _resetIdCounter } from "@/orchestrator/task";
-import { ModelRequirement, TaskTrigger, TaskStatus } from "@/types";
+import { TaskTrigger, TaskStatus } from "@/types";
 import { LLMProvider, LLMResponse } from "@/llm/provider";
 
 describe("Tagger end-to-end flow", () => {
   let queue: TaskQueue;
-  let costTracker: CostTracker;
   let onTaskCompleted: ReturnType<typeof vi.fn>;
   let orchestrator: Orchestrator;
   const tagger = new TaggerModule();
@@ -20,7 +18,6 @@ describe("Tagger end-to-end flow", () => {
   beforeEach(() => {
     _resetIdCounter();
     queue = new TaskQueue();
-    costTracker = new CostTracker();
     onTaskCompleted = vi.fn();
 
     // Mock LLM that returns valid tag suggestions
@@ -28,7 +25,6 @@ describe("Tagger end-to-end flow", () => {
       id: "ollama",
       isAvailable: vi.fn().mockResolvedValue(true),
       complete: vi.fn().mockImplementation(async (req) => {
-        // The mock actually looks at the prompt to generate a plausible response
         const response: LLMResponse = {
           content: JSON.stringify({ tags: ["ai", "deep-learning"] }),
           tokensUsed: { input: 150, output: 30 },
@@ -39,23 +35,13 @@ describe("Tagger end-to-end flow", () => {
       }),
     };
 
-    const mockClaude: LLMProvider = {
-      id: "claude",
-      isAvailable: vi.fn().mockResolvedValue(true),
-      complete: vi.fn(),
-    };
-
     orchestrator = new Orchestrator({
       queue,
-      router: new TaskRouter(mockOllama, mockClaude, false),
+      router: new TaskRouter(mockOllama),
       batcher: new TaskBatcher({ maxBatchSize: 10, contextWindowTokens: 8000 }),
-      costTracker,
-      providers: { ollama: mockOllama, claude: mockClaude },
-      settings: { claudeDailyBudget: 0, claudeMonthlyBudget: 0 },
       onTaskCompleted,
       onTaskFailed: vi.fn(),
       onTaskDeferred: vi.fn(),
-      onCostWarning: vi.fn(),
     });
   });
 
@@ -78,7 +64,6 @@ describe("Tagger end-to-end flow", () => {
         prompt: prompt.prompt,
         maxTokens: prompt.maxTokens,
       },
-      modelRequirement: ModelRequirement.LocalPreferred,
       trigger: TaskTrigger.Manual,
     });
 
@@ -100,7 +85,7 @@ describe("Tagger end-to-end flow", () => {
     expect(parsed!.tags).toContain("deep-learning");
   });
 
-  it("routes local-preferred to Ollama, not Claude", async () => {
+  it("completes a tag-note task successfully using the provider", async () => {
     const prompt = tagger.buildPrompt({
       noteContent: "# Test",
       existingTags: [],
@@ -118,15 +103,13 @@ describe("Tagger end-to-end flow", () => {
         prompt: prompt.prompt,
         maxTokens: prompt.maxTokens,
       },
-      modelRequirement: ModelRequirement.LocalPreferred,
       trigger: TaskTrigger.Automatic,
     });
 
     queue.enqueue(task);
     await orchestrator.processNext();
 
-    // Claude should not have been called
-    const claude = orchestrator["config"].providers.claude;
-    expect(claude.complete).not.toHaveBeenCalled();
+    expect(queue.getTask(task.id)?.status).toBe(TaskStatus.Completed);
+    expect(onTaskCompleted).toHaveBeenCalledTimes(1);
   });
 });

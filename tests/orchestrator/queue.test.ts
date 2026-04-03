@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { TaskQueue } from "@/orchestrator/queue";
 import { createTask, _resetIdCounter, syncIdCounter, Task } from "@/orchestrator/task";
 import {
-  ModelRequirement,
   TaskTrigger,
   TaskStatus,
   TaskPriority,
@@ -14,7 +13,6 @@ function makeTask(overrides?: Partial<Parameters<typeof createTask>[0]>): Task {
     type: "tagger",
     action: "tag-note",
     payload: { notePath: "test.md" },
-    modelRequirement: ModelRequirement.LocalPreferred,
     trigger: TaskTrigger.Automatic,
     ...overrides,
   });

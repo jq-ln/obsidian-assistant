@@ -1,9 +1,3 @@
-export enum ModelRequirement {
-  LocalOnly = "local-only",
-  LocalPreferred = "local-preferred",
-  ClaudeRequired = "claude-required",
-}
-
 export enum TaskPriority {
   High = "high",       // manual/user-initiated
   Normal = "normal",   // automatic triggers
@@ -35,12 +29,6 @@ export type TaskAction =
   | "log-habit"
   | "suggest-cards"
   | "migrate-cards";
-
-/** Per-model pricing in dollars per 1M tokens. Updated with SDK versions. */
-export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  "claude-haiku-4-5-20251001": { input: 0.80, output: 4.00 },
-  "claude-sonnet-4-6": { input: 3.00, output: 15.00 },
-};
 
 export const SCHEMA_VERSION = 1;
 

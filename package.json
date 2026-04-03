@@ -12,7 +12,6 @@
   "keywords": [],
   "license": "MIT",
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.82.0",
     "obsidian": "^1.12.3"
   },
   "devDependencies": {

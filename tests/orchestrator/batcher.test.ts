@@ -1,14 +1,13 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { TaskBatcher } from "@/orchestrator/batcher";
 import { createTask, _resetIdCounter, Task } from "@/orchestrator/task";
-import { ModelRequirement, TaskTrigger } from "@/types";
+import { TaskTrigger } from "@/types";
 
 function makeTagTask(notePath: string, noteContent: string): Task {
   return createTask({
     type: "tagger",
     action: "tag-note",
     payload: { notePath, noteContent },
-    modelRequirement: ModelRequirement.LocalPreferred,
     trigger: TaskTrigger.Automatic,
   });
 }
@@ -29,7 +28,6 @@ describe("TaskBatcher", () => {
         type: "connection-detector",
         action: "scan-connections",
         payload: { notePath: "c.md" },
-        modelRequirement: ModelRequirement.LocalPreferred,
         trigger: TaskTrigger.Automatic,
       }),
     ];
@@ -76,7 +74,6 @@ describe("TaskBatcher", () => {
         type: "tagger",
         action: "audit-tags",
         payload: {},
-        modelRequirement: ModelRequirement.ClaudeRequired,
         trigger: TaskTrigger.Manual,
       }),
     ];

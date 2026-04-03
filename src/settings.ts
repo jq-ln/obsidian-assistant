@@ -1,10 +1,6 @@
 import { App, PluginSettingTab, Plugin, Setting } from "obsidian";
 
 export interface PluginSettings {
-  claudeApiKey: string;
-  claudeModel: "claude-haiku-4-5-20251001" | "claude-sonnet-4-6";
-  claudeDailyBudget: number;   // dollars, 0 = unlimited
-  claudeMonthlyBudget: number; // dollars, 0 = unlimited
   ollamaEndpoint: string;
   ollamaModel: string;
   dashboardPath: string;
@@ -14,7 +10,6 @@ export interface PluginSettings {
   connectionScanIntervalMin: number;
   autoDashboardRefresh: boolean;
   dashboardRefreshIntervalHours: number;
-  localFallbackToClaude: boolean; // when Ollama unavailable, fall back to Claude for local-preferred tasks?
   ankiEnabled: boolean;
   ankiAutoSuggestOnSave: boolean;
   ankiCardFormat: "both" | "basic-only" | "cloze-only";
@@ -22,12 +17,8 @@ export interface PluginSettings {
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
-  claudeApiKey: "",
-  claudeModel: "claude-haiku-4-5-20251001",
-  claudeDailyBudget: 0,
-  claudeMonthlyBudget: 0,
   ollamaEndpoint: "http://localhost:11434",
-  ollamaModel: "llama3:8b",
+  ollamaModel: "qwen2.5:14b",
   dashboardPath: "Dashboard.md",
   autoTagOnSave: true,
   autoTagOnStartup: true,
@@ -35,7 +26,6 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   connectionScanIntervalMin: 30,
   autoDashboardRefresh: true,
   dashboardRefreshIntervalHours: 2,
-  localFallbackToClaude: false,
   ankiEnabled: false,
   ankiAutoSuggestOnSave: false,
   ankiCardFormat: "both",
@@ -71,68 +61,6 @@ export class AssistantSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "AI Assistant Settings" });
-    containerEl.createEl("p", {
-      text: "All settings take effect immediately.",
-      cls: "setting-item-description",
-    });
-
-    // --- Claude ---
-    containerEl.createEl("h3", { text: "Claude API" });
-
-    new Setting(containerEl)
-      .setName("API Key")
-      .setDesc("Your Anthropic API key. Warning: stored in plugin data — exclude from sync if using Git.")
-      .addText((text) => {
-        const t = text as any;
-        t.setPlaceholder("sk-ant-...");
-        t.setValue(this.settings.claudeApiKey);
-        t.onChange(async (value: string) => {
-          this.settings.claudeApiKey = value;
-          await this.save();
-        });
-        if (t.inputEl) t.inputEl.type = "password";
-        return t;
-      });
-
-    new Setting(containerEl)
-      .setName("Model")
-      .setDesc("Haiku is cheaper; Sonnet is stronger for complex tasks")
-      .addDropdown((dropdown) =>
-        (dropdown as any)
-          .addOption("claude-haiku-4-5-20251001", "Haiku (cost-efficient)")
-          .addOption("claude-sonnet-4-6", "Sonnet (stronger)")
-          .setValue(this.settings.claudeModel)
-          .onChange(async (value: string) => {
-            this.settings.claudeModel = value as PluginSettings["claudeModel"];
-            await this.save();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Daily Budget ($)")
-      .setDesc("Max daily Claude spend in dollars. 0 = unlimited.")
-      .addText((text) =>
-        (text as any)
-          .setPlaceholder("0")
-          .setValue(String(this.settings.claudeDailyBudget))
-          .onChange(async (value: string) => {
-            this.settings.claudeDailyBudget = parseFloat(value) || 0;
-            await this.save();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Monthly Budget ($)")
-      .setDesc("Max monthly Claude spend in dollars. 0 = unlimited.")
-      .addText((text) =>
-        (text as any)
-          .setPlaceholder("0")
-          .setValue(String(this.settings.claudeMonthlyBudget))
-          .onChange(async (value: string) => {
-            this.settings.claudeMonthlyBudget = parseFloat(value) || 0;
-            await this.save();
-          }),
-      );
 
     // --- Ollama ---
     containerEl.createEl("h3", { text: "Ollama (Local LLM)" });
@@ -152,7 +80,7 @@ export class AssistantSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Model")
-      .setDesc("Any Ollama-compatible model (e.g., llama3:8b, mistral, phi3)")
+      .setDesc("Any Ollama-compatible model (e.g., qwen2.5:14b, llama3:8b, mistral)")
       .addText((text) =>
         (text as any)
           .setPlaceholder("llama3:8b")
@@ -163,24 +91,12 @@ export class AssistantSettingTab extends PluginSettingTab {
           }),
       );
 
-    new Setting(containerEl)
-      .setName("Fall back to Claude when Ollama unavailable")
-      .setDesc("For local-preferred tasks. Warning: this uses your Claude API budget.")
-      .addToggle((toggle) =>
-        (toggle as any)
-          .setValue(this.settings.localFallbackToClaude)
-          .onChange(async (value: boolean) => {
-            this.settings.localFallbackToClaude = value;
-            await this.save();
-          }),
-      );
-
-    // --- Features ---
+    // --- Automation ---
     containerEl.createEl("h3", { text: "Automation" });
 
     new Setting(containerEl)
       .setName("Auto-tag on save")
-      .setDesc("Suggest tags when a note is saved (uses local LLM if available)")
+      .setDesc("Suggest tags when a note is saved")
       .addToggle((toggle) =>
         (toggle as any)
           .setValue(this.settings.autoTagOnSave)
@@ -272,7 +188,7 @@ export class AssistantSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Enable Anki card suggestions")
-      .setDesc("Use Claude to suggest flashcards from your notes")
+      .setDesc("Suggest flashcards from your notes using the local LLM")
       .addToggle((toggle) =>
         (toggle as any)
           .setValue(this.settings.ankiEnabled)
@@ -286,7 +202,7 @@ export class AssistantSettingTab extends PluginSettingTab {
     if (this.settings.ankiEnabled) {
       new Setting(containerEl)
         .setName("Auto-suggest cards on save")
-        .setDesc("Warning: uses Claude API on every save. Debounced to 10s.")
+        .setDesc("Generate card suggestions on every save. Debounced to 10s.")
         .addToggle((toggle) =>
           (toggle as any)
             .setValue(this.settings.ankiAutoSuggestOnSave)

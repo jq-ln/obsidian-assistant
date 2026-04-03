@@ -4,10 +4,6 @@ export function showNotice(message: string, durationMs = 5000): void {
   new Notice(message, durationMs);
 }
 
-export function showCostWarning(message: string): void {
-  new Notice(`⚠️ ${message}`, 8000);
-}
-
 export function showClickableNotice(
   message: string,
   onClick: () => void,
