@@ -96,6 +96,11 @@ export default class AssistantPlugin extends Plugin {
         leaf,
         this.suggestionsStore,
         this.createSuggestionHandler(),
+        () => this.orchestrator.queue.getActiveTasks().map((t) => ({
+          action: t.action,
+          notePath: t.payload.notePath,
+          status: t.status,
+        })),
       );
       this.checkAnkiPlugin();
       return this.suggestionsPanel;

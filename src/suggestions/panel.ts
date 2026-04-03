@@ -9,9 +9,16 @@ export interface SuggestionHandler {
   onDismiss(suggestion: Suggestion): Promise<void>;
 }
 
+export interface ActiveTask {
+  action: string;
+  notePath?: string;
+  status: string;
+}
+
 export class SuggestionsPanel extends ItemView {
   private store: SuggestionsStore;
   private handler: SuggestionHandler;
+  private getActiveTasks: () => ActiveTask[];
   private setupGuideHtml: string | null = null;
   private expandedGroups = new Set<SuggestionType>();
 
@@ -19,10 +26,12 @@ export class SuggestionsPanel extends ItemView {
     leaf: WorkspaceLeaf,
     store: SuggestionsStore,
     handler: SuggestionHandler,
+    getActiveTasks: () => ActiveTask[],
   ) {
     super(leaf);
     this.store = store;
     this.handler = handler;
+    this.getActiveTasks = getActiveTasks;
   }
 
   getViewType(): string {
@@ -49,6 +58,9 @@ export class SuggestionsPanel extends ItemView {
     this.renderContent(container);
   }
 
+  private taskPollInterval: ReturnType<typeof setInterval> | null = null;
+  private lastActiveCount = 0;
+
   async onOpen(): Promise<void> {
     const container = this.containerEl.children[1] as HTMLElement;
     container.empty();
@@ -59,10 +71,22 @@ export class SuggestionsPanel extends ItemView {
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => this.refresh()),
     );
+
+    // Poll for task state changes (lightweight — just checks count)
+    this.taskPollInterval = setInterval(() => {
+      const count = this.getActiveTasks().length;
+      if (count !== this.lastActiveCount) {
+        this.lastActiveCount = count;
+        this.refresh();
+      }
+    }, 1000);
   }
 
   async onClose(): Promise<void> {
-    // Nothing to clean up
+    if (this.taskPollInterval !== null) {
+      clearInterval(this.taskPollInterval);
+      this.taskPollInterval = null;
+    }
   }
 
   private renderContent(container: HTMLElement): void {
@@ -75,6 +99,36 @@ export class SuggestionsPanel extends ItemView {
       guideEl.style.border = "1px solid var(--background-modifier-border)";
       guideEl.style.borderRadius = "6px";
       guideEl.style.fontSize = "0.85em";
+    }
+
+    // Active tasks section
+    const activeTasks = this.getActiveTasks();
+    if (activeTasks.length > 0) {
+      const taskSection = container.createDiv({ cls: "active-tasks-section" });
+      taskSection.style.marginBottom = "12px";
+      taskSection.style.padding = "8px";
+      taskSection.style.background = "var(--background-secondary)";
+      taskSection.style.borderRadius = "6px";
+
+      const taskHeader = taskSection.createDiv();
+      taskHeader.style.display = "flex";
+      taskHeader.style.alignItems = "center";
+      taskHeader.style.gap = "6px";
+      taskHeader.style.marginBottom = "4px";
+      taskHeader.createEl("span", { text: "Working..." });
+      taskHeader.style.fontWeight = "600";
+      taskHeader.style.fontSize = "0.85em";
+
+      for (const task of activeTasks) {
+        const taskRow = taskSection.createDiv();
+        taskRow.style.fontSize = "0.8em";
+        taskRow.style.color = "var(--text-muted)";
+        taskRow.style.padding = "2px 0";
+
+        const label = this.formatTaskLabel(task);
+        const statusIcon = task.status === "in-progress" ? "..." : "";
+        taskRow.setText(`${label} ${statusIcon}`);
+      }
     }
 
     // Current Note section
@@ -256,5 +310,17 @@ export class SuggestionsPanel extends ItemView {
       }
       this.refresh();
     });
+  }
+
+  private formatTaskLabel(task: ActiveTask): string {
+    const noteName = task.notePath?.replace(/\.md$/, "").split("/").pop() ?? "";
+    const labels: Record<string, string> = {
+      "tag-note": `Tagging ${noteName}`,
+      "audit-tags": "Auditing tags",
+      "scan-connections": `Scanning connections for ${noteName}`,
+      "suggest-cards": `Generating cards for ${noteName}`,
+      "migrate-cards": "Migrating cards",
+    };
+    return labels[task.action] ?? task.action;
   }
 }

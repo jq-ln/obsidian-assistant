@@ -108,6 +108,12 @@ export class TaskQueue {
     );
   }
 
+  getActiveTasks(): Task[] {
+    return Array.from(this.tasks.values()).filter(
+      (t) => t.status === TaskStatus.Pending || t.status === TaskStatus.InProgress,
+    );
+  }
+
   getFailedTasks(): Task[] {
     return Array.from(this.tasks.values()).filter(
       (t) => t.status === TaskStatus.Failed,
