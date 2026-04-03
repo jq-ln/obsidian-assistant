@@ -5,7 +5,6 @@ export interface PluginSettings {
   ollamaModel: string;
   dashboardPath: string;
   autoTagOnSave: boolean;
-  autoTagOnStartup: boolean;
   autoConnectionScan: boolean;
   connectionScanIntervalMin: number;
   connectionMinScore: number;
@@ -22,7 +21,6 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   ollamaModel: "qwen2.5:14b",
   dashboardPath: "Dashboard.md",
   autoTagOnSave: true,
-  autoTagOnStartup: true,
   autoConnectionScan: true,
   connectionScanIntervalMin: 30,
   connectionMinScore: 0.65,
@@ -104,18 +102,6 @@ export class AssistantSettingTab extends PluginSettingTab {
           .setValue(this.settings.autoTagOnSave)
           .onChange(async (value: boolean) => {
             this.settings.autoTagOnSave = value;
-            await this.save();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Auto-tag untagged notes on startup")
-      .setDesc("Batch-tag untagged notes when Obsidian opens")
-      .addToggle((toggle) =>
-        (toggle as any)
-          .setValue(this.settings.autoTagOnStartup)
-          .onChange(async (value: boolean) => {
-            this.settings.autoTagOnStartup = value;
             await this.save();
           }),
       );

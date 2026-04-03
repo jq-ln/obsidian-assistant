@@ -52,6 +52,20 @@ export class DashboardModule {
     sections.push("## Habits\n");
     sections.push(input.habitsMarkdown || "*No habits defined. Edit `AI-Assistant/habits.md` to add some.*\n");
 
+    // Untagged Notes (Dataview query — always current)
+    sections.push("## Untagged Notes\n");
+    sections.push("```dataview");
+    sections.push("TABLE WITHOUT ID");
+    sections.push('  file.link AS "Note",');
+    sections.push('  file.mtime AS "Last Modified"');
+    sections.push("FROM \"\"");
+    sections.push("WHERE !contains(file.path, \"AI-Assistant\")");
+    sections.push("  AND file.name != this.file.name");
+    sections.push("  AND (!file.tags OR length(file.tags) = 0)");
+    sections.push("SORT file.mtime DESC");
+    sections.push("LIMIT 25");
+    sections.push("```\n");
+
     // Recent Activity
     sections.push("## Recent Activity\n");
     if (input.recentActivity.length > 0) {

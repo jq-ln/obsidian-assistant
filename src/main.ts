@@ -244,10 +244,6 @@ export default class AssistantPlugin extends Plugin {
       () => this.saveEmbeddingStore(),
     );
 
-    if (this.settings.autoTagOnStartup) {
-      this.tagAllUntagged();
-    }
-
     if (this.settings.autoConnectionScan) {
       this.registerInterval(
         window.setInterval(
