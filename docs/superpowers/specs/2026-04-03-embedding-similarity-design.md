@@ -77,7 +77,7 @@ FNV-1a hash over the note content string. Fast, no dependencies, collision-resis
 - `remove(path: string): void` — called on note delete. Removes from all maps, subtracts word frequencies, marks dirty.
 - `serialize(): string` — JSON string for persistence.
 - `static deserialize(json: string, provider: EmbeddingProvider): EmbeddingStore` — restores from JSON. Converts plain number arrays to `Float32Array`.
-- `startBackgroundIndex(files: Array<{ path: string, content: string }>): void` — called after layout ready. Kicks off the background loop.
+- `startBackgroundIndex(files: Array<{ path: string }>): void` — called after layout ready. Kicks off the background loop. Content is read lazily on each tick when the note is actually processed, not upfront — reading all content during `onLayoutReady` would defeat the O(n^2) improvement.
 - `stopBackgroundIndex(): void` — clears the interval. Called on plugin unload.
 - `flush(): Promise<void>` — forces an immediate persist. Called on plugin unload.
 
@@ -238,7 +238,7 @@ Description: "Minimum similarity score for connection suggestions. Higher values
 
 ### Note save event
 
-- If the note's content hash differs from the stored hash, call `embeddingStore.ensureEmbedding(path, newContent)` (debounced alongside existing tag-on-save, ~5s)
+- `ensureEmbedding` is called as part of the existing save debounce handler (the `modify` event listener that triggers `debounceTagNote`), not via a second listener. The embedding and tagging share the same debounce timer keyed by path (~5s). When the debounce fires, it calls `ensureEmbedding` before enqueuing the tag task — this means the embedding is fresh when the next connection scan runs.
 
 ### Note delete event
 
@@ -299,6 +299,7 @@ Existing `extractKeywords` tests migrated from `scoring.test.ts`. Function signa
 |------|----------|
 | Connection scan filters by cosine similarity | Mock embedding provider, verify candidates ranked by similarity score and low-scoring candidates excluded |
 | Connection scan builds prompt with keyword summaries | Mock embedding provider, verify prompt contains keyword summaries from `extractKeywords` using `getWordFrequencies()` |
+| Connection scan early return when no candidates pass filter | All candidates below minScore, verify no LLM task enqueued |
 
 All tests mock the HTTP boundary (embedding provider's fetch calls). All internal logic — store, scorer, keyword extraction — runs against real implementations. Consistent with the project's existing testing philosophy.
 
