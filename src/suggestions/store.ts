@@ -46,12 +46,13 @@ export class SuggestionsStore {
   }
 
   getForNote(notePath: string): Suggestion[] {
-    const noteNormalized = notePath.replace(/\.md$/, "");
+    // Connection titles are stored without .md; sourceNotePath is stored with .md
+    const withoutExt = notePath.replace(/\.md$/, "");
     return Array.from(this.suggestions.values()).filter(
       (s) =>
         s.status === "pending" &&
         (s.sourceNotePath === notePath ||
-          (s.type === "connection" && s.title === noteNormalized)),
+          (s.type === "connection" && s.title === withoutExt)),
     );
   }
 
@@ -82,8 +83,12 @@ export class SuggestionsStore {
   }
 
   removeForNote(notePath: string): void {
+    const withoutExt = notePath.replace(/\.md$/, "");
     for (const [id, sug] of this.suggestions.entries()) {
-      if (sug.sourceNotePath === notePath) {
+      if (
+        sug.sourceNotePath === notePath ||
+        (sug.type === "connection" && sug.title === withoutExt)
+      ) {
         this.suggestions.delete(id);
       }
     }

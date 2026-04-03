@@ -873,18 +873,15 @@ export default class AssistantPlugin extends Plugin {
     const notePath = task.payload.notePath;
     if (!this.vaultService.noteExists(notePath)) return;
 
+    const sourceNormalized = notePath.replace(/\.md$/, "");
     let added = 0;
     for (const conn of suggestions) {
-      // Skip self-links
       const connNormalized = conn.path.replace(/\.md$/, "");
-      const sourceNormalized = notePath.replace(/\.md$/, "");
       if (connNormalized === sourceNormalized) continue;
-
-      const linkName = connNormalized;
       const sug = createSuggestion({
         type: "connection",
         sourceNotePath: notePath,
-        title: linkName,
+        title: connNormalized,
         detail: conn.reason,
       });
       this.suggestionsStore.add(sug);
