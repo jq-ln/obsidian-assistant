@@ -22,6 +22,11 @@ import { HabitTracker } from "./modules/dashboard/habits";
 import { DashboardModule } from "./modules/dashboard/dashboard";
 import { SuggestionModal } from "./ui/suggestion-modal";
 import { showNotice, showCostWarning, showClickableNotice } from "./ui/notices";
+import { AnkiModule } from "./modules/anki/anki";
+import { CardMigration } from "./modules/anki/card-migration";
+import { SuggestionsStore } from "./suggestions/store";
+import { SuggestionsPanel, SUGGESTIONS_VIEW_TYPE, SuggestionHandler } from "./suggestions/panel";
+import { createSuggestion, Suggestion } from "./suggestions/suggestion";
 
 export default class AssistantPlugin extends Plugin {
   settings: PluginSettings = DEFAULT_SETTINGS;
@@ -35,6 +40,10 @@ export default class AssistantPlugin extends Plugin {
   private habitTracker = new HabitTracker();
   private dashboard = new DashboardModule();
   private debounceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+  private ankiModule = new AnkiModule();
+  private cardMigration!: CardMigration;
+  private suggestionsStore!: SuggestionsStore;
+  private suggestionsPanel: SuggestionsPanel | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -82,6 +91,26 @@ export default class AssistantPlugin extends Plugin {
 
     // Initialize vault folder structure
     await this.initializeVaultFolder();
+
+    // Load suggestions store
+    this.suggestionsStore = await this.loadSuggestionsStore();
+    this.cardMigration = new CardMigration(this.vaultService);
+
+    // Register suggestions panel view
+    this.registerView(SUGGESTIONS_VIEW_TYPE, (leaf) => {
+      this.suggestionsPanel = new SuggestionsPanel(
+        leaf,
+        this.suggestionsStore,
+        this.createSuggestionHandler(),
+      );
+      this.checkAnkiPlugin();
+      return this.suggestionsPanel;
+    });
+
+    // Add ribbon icon to open panel
+    this.addRibbonIcon("lightbulb", "AI Suggestions", () => {
+      this.activateSuggestionsPanel();
+    });
 
     // Register commands
     this.addCommand({
@@ -132,12 +161,26 @@ export default class AssistantPlugin extends Plugin {
       callback: () => this.retryFailedTasks(),
     });
 
+    this.addCommand({
+      id: "suggest-anki-cards",
+      name: "Suggest Anki cards for this note",
+      callback: () => this.suggestAnkiCards(),
+    });
+
     // Settings tab
     this.addSettingTab(
-      new AssistantSettingTab(this.app, this, this.settings, async (s) => {
-        this.settings = s;
-        await this.saveSettings();
-      }),
+      new AssistantSettingTab(
+        this.app,
+        this,
+        this.settings,
+        async (s) => {
+          this.settings = s;
+          await this.saveSettings();
+        },
+        (oldLocation, newLocation) => {
+          this.queueCardMigration(oldLocation, newLocation);
+        },
+      ),
     );
 
     // Auto-triggers
@@ -165,6 +208,16 @@ export default class AssistantPlugin extends Plugin {
       );
     }
 
+    if (this.settings.ankiEnabled && this.settings.ankiAutoSuggestOnSave) {
+      this.registerEvent(
+        this.app.vault.on("modify", (file) => {
+          if (file instanceof TFile && file.extension === "md") {
+            this.debounceAnkiSuggest(file.path, 10000);
+          }
+        }),
+      );
+    }
+
     if (this.settings.autoDashboardRefresh) {
       this.registerInterval(
         window.setInterval(
@@ -185,6 +238,7 @@ export default class AssistantPlugin extends Plugin {
   async onunload(): Promise<void> {
     await this.saveQueue();
     await this.saveCostTracker();
+    await this.saveSuggestionsStore();
     for (const timer of this.debounceTimers.values()) {
       clearTimeout(timer);
     }
@@ -234,6 +288,56 @@ export default class AssistantPlugin extends Plugin {
       `${ASSISTANT_FOLDER}/usage.json`,
       this.orchestrator.costTracker.serialize(),
     );
+  }
+
+  // --- Suggestions store persistence ---
+
+  private async loadSuggestionsStore(): Promise<SuggestionsStore> {
+    const content = await this.vaultService.readNote(`${ASSISTANT_FOLDER}/suggestions.json`);
+    if (content) {
+      try { return SuggestionsStore.deserialize(content); } catch { /* start fresh */ }
+    }
+    return new SuggestionsStore();
+  }
+
+  private async saveSuggestionsStore(): Promise<void> {
+    await this.vaultService.writeNote(
+      `${ASSISTANT_FOLDER}/suggestions.json`,
+      this.suggestionsStore.serialize(),
+    );
+  }
+
+  // --- Panel activation ---
+
+  private async activateSuggestionsPanel(): Promise<void> {
+    const existing = this.app.workspace.getLeavesOfType(SUGGESTIONS_VIEW_TYPE);
+    if (existing.length > 0) {
+      this.app.workspace.revealLeaf(existing[0]);
+      return;
+    }
+    const leaf = this.app.workspace.getRightLeaf(false);
+    if (leaf) {
+      await leaf.setViewState({ type: SUGGESTIONS_VIEW_TYPE, active: true });
+      this.app.workspace.revealLeaf(leaf);
+    }
+  }
+
+  private checkAnkiPlugin(): void {
+    if (!this.settings.ankiEnabled || !this.suggestionsPanel) return;
+
+    const ankiPlugin = (this.app as any).plugins?.getPlugin?.("obsidian-to-anki-plugin");
+    if (!ankiPlugin) {
+      this.suggestionsPanel.setSetupGuide(
+        `<strong>Anki Setup Required</strong><br>
+        To sync flashcards to Anki:<br>
+        1. Install <em>Obsidian to Anki</em> from Community Plugins<br>
+        2. Install <em>AnkiConnect</em> add-on in Anki (code: 2055492159)<br>
+        3. Have Anki running when you want to sync<br><br>
+        <em>Cards still work as markdown study material without Anki.</em>`,
+      );
+    } else {
+      this.suggestionsPanel.setSetupGuide(null);
+    }
   }
 
   // --- Vault initialization ---
@@ -603,6 +707,12 @@ export default class AssistantPlugin extends Plugin {
       case "scan-connections":
         await this.handleConnectionResult(task, response);
         break;
+      case "suggest-cards":
+        await this.handleAnkiResult(task, response);
+        break;
+      case "migrate-cards":
+        await this.handleCardMigration(task);
+        break;
     }
 
     // Persist state after each completion
@@ -630,40 +740,25 @@ export default class AssistantPlugin extends Plugin {
     const notePath = task.payload.notePath;
     if (!this.vaultService.noteExists(notePath)) return;
 
+    // Still write to frontmatter for backwards compat
     await this.vaultService.updateFrontmatter(notePath, {
       "suggested-tags": suggestedTags,
     });
 
-    showClickableNotice(
-      `${suggestedTags.length} tags suggested for ${notePath} — click to review`,
-      () => {
-        new SuggestionModal(
-          this.app,
-          `Suggested tags for ${notePath}`,
-          suggestedTags!.map((t) => ({ label: t })),
-          async (decision) => {
-            const fm = await this.vaultService.parseFrontmatter(notePath);
-            const existingTags = fm.tags ?? [];
-            const existingRejected = fm["rejected-tags"] ?? [];
+    // Emit to suggestions store
+    for (const tag of suggestedTags) {
+      const sug = createSuggestion({
+        type: "tag",
+        sourceNotePath: notePath,
+        title: tag,
+        detail: `Suggested tag for ${notePath.split("/").pop()}`,
+      });
+      this.suggestionsStore.add(sug);
+    }
 
-            await this.vaultService.updateFrontmatter(notePath, {
-              tags: [...existingTags, ...decision.accepted],
-              "rejected-tags":
-                decision.rejected.length > 0
-                  ? [...existingRejected, ...decision.rejected]
-                  : existingRejected.length > 0
-                    ? existingRejected
-                    : undefined,
-              "suggested-tags": undefined,
-              "ai-tagged": decision.accepted.length > 0 ? true : undefined,
-            });
-            showNotice(
-              `Applied ${decision.accepted.length} tags, rejected ${decision.rejected.length}.`,
-            );
-          },
-        ).open();
-      },
-    );
+    await this.saveSuggestionsStore();
+    this.suggestionsPanel?.refresh();
+    showNotice(`${suggestedTags.length} tag suggestions — check the panel`);
   }
 
   private async handleAuditResult(task: Task, response: LLMResponse): Promise<void> {
@@ -747,41 +842,22 @@ export default class AssistantPlugin extends Plugin {
     if (!suggestions || suggestions.length === 0) return;
 
     const notePath = task.payload.notePath;
-    showClickableNotice(
-      `${suggestions.length} connections found for ${notePath} — click to review`,
-      () => {
-        new SuggestionModal(
-          this.app,
-          `Suggested connections for ${notePath}`,
-          suggestions.map((s) => ({
-            label: s.path.replace(/\.md$/, ""),
-            description: s.reason,
-          })),
-          async (decision) => {
-            if (decision.accepted.length === 0) return;
+    if (!this.vaultService.noteExists(notePath)) return;
 
-            const acceptedSuggestions = suggestions.filter((s) =>
-              decision.accepted.includes(s.path.replace(/\.md$/, "")),
-            );
+    for (const conn of suggestions) {
+      const linkName = conn.path.replace(/\.md$/, "");
+      const sug = createSuggestion({
+        type: "connection",
+        sourceNotePath: notePath,
+        title: linkName,
+        detail: conn.reason,
+      });
+      this.suggestionsStore.add(sug);
+    }
 
-            const content = await this.vaultService.readNote(notePath);
-            if (!content) return;
-
-            const relatedSection = this.connections.buildRelatedSection(acceptedSuggestions);
-
-            // Append or merge with existing Related section
-            if (content.includes("\n## Related")) {
-              const beforeRelated = content.split("\n## Related")[0];
-              await this.vaultService.writeNote(notePath, beforeRelated + relatedSection);
-            } else {
-              await this.vaultService.writeNote(notePath, content + relatedSection);
-            }
-
-            showNotice(`Added ${decision.accepted.length} connections to ${notePath}.`);
-          },
-        ).open();
-      },
-    );
+    await this.saveSuggestionsStore();
+    this.suggestionsPanel?.refresh();
+    showNotice(`${suggestions.length} connection suggestions — check the panel`);
   }
 
   private retryFailedTasks(): void {
@@ -796,5 +872,237 @@ export default class AssistantPlugin extends Plugin {
     }
 
     showNotice(`Retrying ${failed.length} failed tasks.`);
+  }
+
+  // --- Anki commands ---
+
+  private async suggestAnkiCards(): Promise<void> {
+    if (!this.settings.ankiEnabled) {
+      showNotice("Enable Anki card suggestions in settings first.");
+      return;
+    }
+
+    const file = this.app.workspace.getActiveViewOfType(MarkdownView)?.file;
+    if (!file) {
+      showNotice("No active note.");
+      return;
+    }
+
+    const content = await this.vaultService.readNote(file.path);
+    if (!content) return;
+
+    const existingCards = this.ankiModule.extractExistingCards(content);
+    const prompt = this.ankiModule.buildPrompt({
+      noteContent: content,
+      existingCards,
+      cardFormat: this.settings.ankiCardFormat,
+    });
+
+    const task = createTask({
+      type: "anki",
+      action: "suggest-cards",
+      payload: {
+        notePath: file.path,
+        systemPrompt: prompt.system,
+        prompt: prompt.prompt,
+        maxTokens: prompt.maxTokens,
+      },
+      modelRequirement: ModelRequirement.ClaudeRequired,
+      trigger: TaskTrigger.Manual,
+    });
+
+    this.orchestrator.queue.enqueue(task);
+    showNotice(`Queued card suggestions for ${file.basename}`);
+  }
+
+  private debounceAnkiSuggest(path: string, delayMs: number): void {
+    const key = `anki:${path}`;
+    const existing = this.debounceTimers.get(key);
+    if (existing) clearTimeout(existing);
+
+    this.debounceTimers.set(
+      key,
+      setTimeout(() => {
+        this.debounceTimers.delete(key);
+        this.enqueueAnkiSuggest(path);
+      }, delayMs),
+    );
+  }
+
+  private async enqueueAnkiSuggest(path: string): Promise<void> {
+    if (!this.settings.ankiEnabled) return;
+
+    const content = await this.vaultService.readNote(path);
+    if (!content) return;
+
+    const existingCards = this.ankiModule.extractExistingCards(content);
+    const prompt = this.ankiModule.buildPrompt({
+      noteContent: content,
+      existingCards,
+      cardFormat: this.settings.ankiCardFormat,
+    });
+
+    const task = createTask({
+      type: "anki",
+      action: "suggest-cards",
+      payload: {
+        notePath: path,
+        systemPrompt: prompt.system,
+        prompt: prompt.prompt,
+        maxTokens: prompt.maxTokens,
+      },
+      modelRequirement: ModelRequirement.ClaudeRequired,
+      trigger: TaskTrigger.Automatic,
+    });
+
+    this.orchestrator.queue.enqueue(task);
+  }
+
+  // --- Anki completion handler ---
+
+  private async handleAnkiResult(task: Task, response: LLMResponse): Promise<void> {
+    const cards = this.ankiModule.parseResponse(response.content);
+    if (!cards || cards.length === 0) return;
+
+    const notePath = task.payload.notePath;
+    if (!this.vaultService.noteExists(notePath)) return;
+
+    // Emit each card as a suggestion
+    for (const card of cards) {
+      const cardText = this.ankiModule.formatCardMarkdown(card);
+      const sug = createSuggestion({
+        type: "anki-card",
+        sourceNotePath: notePath,
+        title: card.type === "basic" ? card.front : card.text.slice(0, 50) + "...",
+        detail: card.type === "basic" ? `${card.front}::${card.back}` : card.text,
+        editable: cardText,
+      });
+      this.suggestionsStore.add(sug);
+    }
+
+    await this.saveSuggestionsStore();
+    this.suggestionsPanel?.refresh();
+    showNotice(`${cards.length} card suggestions — check the panel`);
+  }
+
+  // --- Suggestion acceptance handler ---
+
+  private createSuggestionHandler(): SuggestionHandler {
+    return {
+      onAccept: async (suggestion: Suggestion) => {
+        switch (suggestion.type) {
+          case "tag":
+            await this.acceptTagSuggestion(suggestion);
+            break;
+          case "connection":
+            await this.acceptConnectionSuggestion(suggestion);
+            break;
+          case "anki-card":
+            await this.acceptAnkiCardSuggestion(suggestion);
+            break;
+        }
+        await this.saveSuggestionsStore();
+      },
+      onDismiss: async (suggestion: Suggestion) => {
+        if (suggestion.type === "tag") {
+          await this.dismissTagSuggestion(suggestion);
+        }
+        await this.saveSuggestionsStore();
+      },
+    };
+  }
+
+  private async acceptTagSuggestion(suggestion: Suggestion): Promise<void> {
+    const fm = await this.vaultService.parseFrontmatter(suggestion.sourceNotePath);
+    const existingTags = fm.tags ?? [];
+    await this.vaultService.updateFrontmatter(suggestion.sourceNotePath, {
+      tags: [...existingTags, suggestion.title],
+      "suggested-tags": undefined,
+      "ai-tagged": true,
+    });
+  }
+
+  private async dismissTagSuggestion(suggestion: Suggestion): Promise<void> {
+    const fm = await this.vaultService.parseFrontmatter(suggestion.sourceNotePath);
+    const existingRejected = fm["rejected-tags"] ?? [];
+    await this.vaultService.updateFrontmatter(suggestion.sourceNotePath, {
+      "rejected-tags": [...existingRejected, suggestion.title],
+    });
+  }
+
+  private async acceptConnectionSuggestion(suggestion: Suggestion): Promise<void> {
+    const content = await this.vaultService.readNote(suggestion.sourceNotePath);
+    if (!content) return;
+
+    const linkName = suggestion.title;
+    const relatedLine = `- [[${linkName}]] — ${suggestion.detail}`;
+
+    if (content.includes("\n## Related")) {
+      const beforeRelated = content.split("\n## Related")[0];
+      const afterParts = content.split("\n## Related")[1] ?? "";
+      const updated = `${beforeRelated}\n## Related${afterParts.replace(/\s*$/, "")}\n${relatedLine}\n`;
+      await this.vaultService.writeNote(suggestion.sourceNotePath, updated);
+    } else {
+      await this.vaultService.writeNote(
+        suggestion.sourceNotePath,
+        `${content.replace(/\s*$/, "")}\n\n## Related\n${relatedLine}\n`,
+      );
+    }
+  }
+
+  private async acceptAnkiCardSuggestion(suggestion: Suggestion): Promise<void> {
+    const cardText = suggestion.editable ?? suggestion.detail;
+    const notePath = suggestion.sourceNotePath;
+
+    if (this.settings.ankiCardLocation === "separate-file") {
+      const cardFilePath = this.cardMigration.getCardFilePath(
+        notePath,
+        `${ASSISTANT_FOLDER}/cards`,
+      );
+      const existing = await this.vaultService.readNote(cardFilePath);
+      if (existing) {
+        const updated = this.ankiModule.appendCardsToContent(existing, [cardText]);
+        await this.vaultService.writeNote(cardFilePath, updated);
+      } else {
+        const content = this.ankiModule.buildFlashcardsSection([cardText]);
+        await this.vaultService.writeNote(cardFilePath, content.trim() + "\n");
+      }
+    } else {
+      const content = await this.vaultService.readNote(notePath);
+      if (!content) return;
+      const updated = this.ankiModule.appendCardsToContent(content, [cardText]);
+      await this.vaultService.writeNote(notePath, updated);
+    }
+  }
+
+  // --- Card migration ---
+
+  private queueCardMigration(oldLocation: string, newLocation: string): void {
+    const task = createTask({
+      type: "anki",
+      action: "migrate-cards",
+      payload: { from: oldLocation, to: newLocation },
+      modelRequirement: ModelRequirement.LocalOnly,
+      trigger: TaskTrigger.Manual,
+    });
+    this.orchestrator.queue.enqueue(task);
+    showNotice("Card migration queued. Cards will be moved in the background.");
+  }
+
+  private async handleCardMigration(task: Task): Promise<void> {
+    const { to } = task.payload;
+    const cardsFolder = `${ASSISTANT_FOLDER}/cards`;
+    const files = this.vaultService.getMarkdownFiles();
+
+    for (const file of files) {
+      if (file.path.startsWith(`${ASSISTANT_FOLDER}/`)) continue; // Skip plugin files
+
+      if (to === "separate-file") {
+        await this.cardMigration.migrateToSeparateFile(file.path, cardsFolder);
+      } else {
+        await this.cardMigration.migrateToInNote(file.path, cardsFolder);
+      }
+    }
+    showNotice("Card migration complete.");
   }
 }
