@@ -9,7 +9,6 @@ describe("DashboardModule", () => {
     it("generates markdown with all sections", () => {
       const md = dashboard.renderDashboard({
         goalsContent: "- Learn Rust\n- Ship the plugin",
-        tasksMarkdown: "- [ ] Fix bug *(plan)*\n",
         habitsMarkdown: "| Exercise | [x][x] | 2 days |",
         recentActivity: [
           { path: "new-note.md", action: "created", date: "2026-04-02" },
@@ -23,9 +22,10 @@ describe("DashboardModule", () => {
       expect(md).toContain("## Goals");
       expect(md).toContain("Learn Rust");
       expect(md).toContain("## Active Tasks");
-      expect(md).toContain("Fix bug");
+      expect(md).toContain("TASK"); // Dataview query
       expect(md).toContain("## Habits");
       expect(md).toContain("Exercise");
+      expect(md).toContain("## Untagged Notes");
       expect(md).toContain("## Recent Activity");
       expect(md).toContain("new-note.md");
       expect(md).toContain("3 pending suggestions");
@@ -35,7 +35,6 @@ describe("DashboardModule", () => {
     it("handles empty goals gracefully", () => {
       const md = dashboard.renderDashboard({
         goalsContent: "",
-        tasksMarkdown: "",
         habitsMarkdown: "",
         recentActivity: [],
         pendingSuggestions: 0,

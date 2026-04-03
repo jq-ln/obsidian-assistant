@@ -8,7 +8,6 @@ export interface ActivityEntry {
 
 export interface DashboardInput {
   goalsContent: string;
-  tasksMarkdown: string;
   habitsMarkdown: string;
   recentActivity: ActivityEntry[];
   pendingSuggestions: number;
@@ -44,9 +43,17 @@ export class DashboardModule {
       sections.push("*No goals set. Edit `AI-Assistant/goals.md` to add your goals.*\n");
     }
 
-    // Active Tasks
+    // Active Tasks (Dataview query — always current)
     sections.push("## Active Tasks\n");
-    sections.push(input.tasksMarkdown || "*No open tasks found.*\n");
+    sections.push("```dataview");
+    sections.push("TASK");
+    sections.push("FROM \"\"");
+    sections.push("WHERE !completed");
+    sections.push("  AND !contains(meta(section).subpath, \"AI-Assistant\")");
+    sections.push("  AND file.name != this.file.name");
+    sections.push("SORT due ASC");
+    sections.push("LIMIT 25");
+    sections.push("```\n");
 
     // Habits
     sections.push("## Habits\n");

@@ -18,7 +18,7 @@ import { OllamaEmbeddingProvider } from "./embeddings/provider";
 import { EmbeddingStore, fnv1aHash } from "./embeddings/store";
 import { SimilarityScorer } from "./embeddings/similarity";
 import { ConnectionModule } from "./modules/connections/connections";
-import { TaskAggregator } from "./modules/dashboard/task-aggregator";
+
 import { HabitTracker } from "./modules/dashboard/habits";
 import { DashboardModule } from "./modules/dashboard/dashboard";
 import { SuggestionModal } from "./ui/suggestion-modal";
@@ -39,7 +39,7 @@ export default class AssistantPlugin extends Plugin {
   private embeddingStore!: EmbeddingStore;
   private similarityScorer!: SimilarityScorer;
   private connections = new ConnectionModule();
-  private taskAggregator = new TaskAggregator();
+
   private habitTracker = new HabitTracker();
   private dashboard = new DashboardModule();
   private debounceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
@@ -646,18 +646,6 @@ export default class AssistantPlugin extends Plugin {
     const habitLog = this.habitTracker.deserializeLog(habitLogJson);
     const today = new Date().toISOString().split("T")[0];
 
-    // Aggregate tasks from vault
-    const allTasks = [];
-    for (const file of this.vaultService.getMarkdownFiles()) {
-      const content = await this.vaultService.readNote(file.path);
-      if (content) {
-        allTasks.push(
-          ...this.taskAggregator.extractTasks(content, file.path, file.stat.mtime),
-        );
-      }
-    }
-    const rankedTasks = this.taskAggregator.rankTasks(allTasks, 15);
-
     // Collect recently modified files (last 7 days)
     const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     const recentActivity = this.vaultService
@@ -681,7 +669,6 @@ export default class AssistantPlugin extends Plugin {
 
     const md = this.dashboard.renderDashboard({
       goalsContent,
-      tasksMarkdown: this.taskAggregator.renderTasksMarkdown(rankedTasks),
       habitsMarkdown: this.habitTracker.renderHabitsMarkdown(habits, habitLog, today),
       recentActivity,
       pendingSuggestions,
