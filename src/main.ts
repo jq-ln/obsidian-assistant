@@ -45,16 +45,18 @@ export default class AssistantPlugin extends Plugin {
   private ankiAutoSuggestRef: (() => void) | null = null;
   private suggestionsStore!: SuggestionsStore;
   private suggestionsPanel: SuggestionsPanel | null = null;
+  private ollama!: OllamaProvider;
+  private claude!: ClaudeProvider;
 
   async onload(): Promise<void> {
     await this.loadSettings();
     this.vaultService = new VaultService(this.app);
 
-    const ollama = new OllamaProvider(
+    this.ollama = new OllamaProvider(
       this.settings.ollamaEndpoint,
       this.settings.ollamaModel,
     );
-    const claude = new ClaudeProvider(
+    this.claude = new ClaudeProvider(
       this.settings.claudeApiKey,
       this.settings.claudeModel,
     );
@@ -65,8 +67,8 @@ export default class AssistantPlugin extends Plugin {
     queue.recoverOnStartup();
 
     const router = new TaskRouter(
-      ollama,
-      claude,
+      this.ollama,
+      this.claude,
       this.settings.localFallbackToClaude,
     );
     const batcher = new TaskBatcher({
@@ -79,7 +81,7 @@ export default class AssistantPlugin extends Plugin {
       router,
       batcher,
       costTracker,
-      providers: { ollama, claude },
+      providers: { ollama: this.ollama, claude: this.claude },
       settings: {
         claudeDailyBudget: this.settings.claudeDailyBudget,
         claudeMonthlyBudget: this.settings.claudeMonthlyBudget,
@@ -90,14 +92,11 @@ export default class AssistantPlugin extends Plugin {
       onCostWarning: (msg) => showCostWarning(msg),
     });
 
-    // Initialize vault folder structure
-    await this.initializeVaultFolder();
-
     // Load suggestions store
     this.suggestionsStore = await this.loadSuggestionsStore();
     this.cardMigration = new CardMigration(this.vaultService);
 
-    // Register suggestions panel view
+    // Register UI immediately — these don't depend on vault readiness
     this.registerView(SUGGESTIONS_VIEW_TYPE, (leaf) => {
       this.suggestionsPanel = new SuggestionsPanel(
         leaf,
@@ -108,12 +107,10 @@ export default class AssistantPlugin extends Plugin {
       return this.suggestionsPanel;
     });
 
-    // Add ribbon icon to open panel
     this.addRibbonIcon("lightbulb", "AI Suggestions", () => {
       this.activateSuggestionsPanel();
     });
 
-    // Register commands
     this.addCommand({
       id: "tag-this-note",
       name: "Tag this note",
@@ -168,7 +165,6 @@ export default class AssistantPlugin extends Plugin {
       callback: () => this.suggestAnkiCards(),
     });
 
-    // Settings tab
     this.addSettingTab(
       new AssistantSettingTab(
         this.app,
@@ -206,32 +202,7 @@ export default class AssistantPlugin extends Plugin {
       );
     }
 
-    if (this.settings.autoTagOnStartup) {
-      // Delay to let vault fully load
-      setTimeout(() => this.tagAllUntagged(), 5000);
-    }
-
-    if (this.settings.autoConnectionScan) {
-      this.registerInterval(
-        window.setInterval(
-          () => this.scanRecentConnections(),
-          this.settings.connectionScanIntervalMin * 60 * 1000,
-        ),
-      );
-    }
-
     this.updateAnkiAutoSuggest();
-
-    if (this.settings.autoDashboardRefresh) {
-      this.registerInterval(
-        window.setInterval(
-          () => this.updateDashboard(),
-          this.settings.dashboardRefreshIntervalHours * 60 * 60 * 1000,
-        ),
-      );
-      // Also on startup
-      setTimeout(() => this.updateDashboard(), 10000);
-    }
 
     // Process queue periodically
     this.registerInterval(
@@ -245,9 +216,42 @@ export default class AssistantPlugin extends Plugin {
         this.saveSuggestionsStore();
       }, 60 * 60 * 1000),
     );
+
+    // Defer vault-dependent initialization until the layout is ready,
+    // which guarantees the vault metadata cache is populated.
+    this.app.workspace.onLayoutReady(() => this.onLayoutReady());
+  }
+
+  private async onLayoutReady(): Promise<void> {
+    await this.initializeVaultFolder();
+
+    if (this.settings.autoTagOnStartup) {
+      this.tagAllUntagged();
+    }
+
+    if (this.settings.autoConnectionScan) {
+      this.registerInterval(
+        window.setInterval(
+          () => this.scanRecentConnections(),
+          this.settings.connectionScanIntervalMin * 60 * 1000,
+        ),
+      );
+    }
+
+    if (this.settings.autoDashboardRefresh) {
+      this.registerInterval(
+        window.setInterval(
+          () => this.updateDashboard(),
+          this.settings.dashboardRefreshIntervalHours * 60 * 60 * 1000,
+        ),
+      );
+      this.updateDashboard();
+    }
   }
 
   async onunload(): Promise<void> {
+    this.ankiAutoSuggestRef?.();
+    this.ankiAutoSuggestRef = null;
     await this.saveQueue();
     await this.saveCostTracker();
     await this.saveSuggestionsStore();
@@ -267,6 +271,14 @@ export default class AssistantPlugin extends Plugin {
     this.orchestrator.updateSettings({
       claudeDailyBudget: this.settings.claudeDailyBudget,
       claudeMonthlyBudget: this.settings.claudeMonthlyBudget,
+    });
+    this.claude.updateConfig({
+      apiKey: this.settings.claudeApiKey,
+      model: this.settings.claudeModel,
+    });
+    this.ollama.updateConfig({
+      endpoint: this.settings.ollamaEndpoint,
+      model: this.settings.ollamaModel,
     });
     this.updateAnkiAutoSuggest();
   }

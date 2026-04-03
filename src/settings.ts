@@ -72,7 +72,7 @@ export class AssistantSettingTab extends PluginSettingTab {
     containerEl.empty();
     containerEl.createEl("h2", { text: "AI Assistant Settings" });
     containerEl.createEl("p", {
-      text: "Note: Changes to API key, endpoint, or model settings require reloading the plugin to take effect.",
+      text: "All settings take effect immediately.",
       cls: "setting-item-description",
     });
 

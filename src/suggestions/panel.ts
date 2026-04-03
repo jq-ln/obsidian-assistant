@@ -211,8 +211,13 @@ export class SuggestionsPanel extends ItemView {
     const dismissBtn = actions.createEl("button", { text: "Dismiss" });
     dismissBtn.style.fontSize = "0.8em";
     dismissBtn.addEventListener("click", async () => {
-      await this.handler.onDismiss(suggestion);
-      this.store.dismiss(suggestion.id);
+      try {
+        await this.handler.onDismiss(suggestion);
+        this.store.dismiss(suggestion.id);
+      } catch (e: any) {
+        const { Notice } = await import("obsidian");
+        new Notice(`Failed to dismiss suggestion: ${e.message ?? e}`);
+      }
       this.refresh();
     });
   }

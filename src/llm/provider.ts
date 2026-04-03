@@ -16,4 +16,5 @@ export interface LLMProvider {
   readonly id: string;
   isAvailable(): Promise<boolean>;
   complete(request: LLMRequest): Promise<LLMResponse>;
+  updateConfig?(config: Record<string, string>): void;
 }

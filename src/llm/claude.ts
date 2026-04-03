@@ -24,7 +24,17 @@ export class ClaudeProvider implements LLMProvider {
     this.apiKey = apiKey;
     this.model = model;
     if (apiKey) {
-      this.client = new Anthropic({ apiKey });
+      this.client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
+    }
+  }
+
+  updateConfig(config: Record<string, string>): void {
+    if (config.apiKey !== undefined) {
+      this.apiKey = config.apiKey;
+      this.client = config.apiKey ? new Anthropic({ apiKey: config.apiKey, dangerouslyAllowBrowser: true }) : null;
+    }
+    if (config.model !== undefined) {
+      this.model = config.model;
     }
   }
 

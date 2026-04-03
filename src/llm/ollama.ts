@@ -21,6 +21,17 @@ export class OllamaProvider implements LLMProvider {
     this.model = model;
   }
 
+  updateConfig(config: Record<string, string>): void {
+    if (config.endpoint !== undefined) {
+      this.endpoint = config.endpoint.replace(/\/$/, "");
+      this.cachedAvailable = null;
+      this.cacheTimestamp = 0;
+    }
+    if (config.model !== undefined) {
+      this.model = config.model;
+    }
+  }
+
   async isAvailable(): Promise<boolean> {
     const now = Date.now();
     if (this.cachedAvailable !== null && now - this.cacheTimestamp < this.CACHE_TTL_MS) {
