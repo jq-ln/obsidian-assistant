@@ -137,6 +137,31 @@ export class MarkdownView {
   file: TFile | null = null;
 }
 
+export class WorkspaceLeaf {
+  app = new App();
+}
+
+export class ItemView {
+  app: App;
+  containerEl: HTMLElement = {
+    children: [{}, { empty: () => {}, createEl: () => ({}), createDiv: () => ({}), addClass: () => {} }],
+  } as any;
+  leaf: WorkspaceLeaf;
+
+  constructor(leaf: WorkspaceLeaf) {
+    this.leaf = leaf;
+    this.app = (leaf as any).app ?? new App();
+  }
+
+  getViewType(): string { return ""; }
+  getDisplayText(): string { return ""; }
+  getIcon(): string { return ""; }
+  registerEvent(_event: unknown): void {}
+
+  async onOpen(): Promise<void> {}
+  async onClose(): Promise<void> {}
+}
+
 export function parseFrontMatterTags(fm: unknown): string[] | null {
   if (fm && typeof fm === "object" && "tags" in fm) {
     return (fm as { tags: string[] }).tags;
