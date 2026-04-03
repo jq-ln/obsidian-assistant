@@ -23,7 +23,7 @@ export enum TaskTrigger {
   Manual = "manual",
 }
 
-export type TaskType = "tagger" | "connection-detector" | "dashboard";
+export type TaskType = "tagger" | "connection-detector" | "dashboard" | "anki";
 
 export type TaskAction =
   | "tag-note"
@@ -32,7 +32,9 @@ export type TaskAction =
   | "scan-connections"
   | "scan-connections-deep"
   | "generate-dashboard"
-  | "log-habit";
+  | "log-habit"
+  | "suggest-cards"
+  | "migrate-cards";
 
 /** Per-model pricing in dollars per 1M tokens. Updated with SDK versions. */
 export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
