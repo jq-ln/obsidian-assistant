@@ -60,6 +60,17 @@ export class DashboardView extends ItemView {
       try { this.trackingLog = TrackingLog.deserialize(logJson); } catch { this.trackingLog = new TrackingLog(); }
     }
 
+    // Migrate from old habit-log format if needed
+    if (!logJson) {
+      const oldLog = await this.deps.readNote(`${this.deps.assistantFolder}/habit-log.md`);
+      if (oldLog && oldLog.trim() !== "{}") {
+        try {
+          this.trackingLog = TrackingLog.migrateFromHabitLog(oldLog);
+          await this.saveTrackingLog();
+        } catch { /* old format unreadable, start fresh */ }
+      }
+    }
+
     const rediscoveryJson = await this.deps.readNote(`${this.deps.assistantFolder}/rediscovery.json`);
     if (rediscoveryJson) {
       try { this.rediscoveryCache = JSON.parse(rediscoveryJson); } catch { this.rediscoveryCache = null; }

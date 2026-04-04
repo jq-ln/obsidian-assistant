@@ -3,13 +3,15 @@ import { App, PluginSettingTab, Plugin, Setting } from "obsidian";
 export interface PluginSettings {
   ollamaEndpoint: string;
   ollamaModel: string;
-  dashboardPath: string;
   autoTagOnSave: boolean;
   autoConnectionScan: boolean;
   connectionScanIntervalMin: number;
   connectionMinScore: number;
-  autoDashboardRefresh: boolean;
-  dashboardRefreshIntervalHours: number;
+  openDashboardOnStartup: boolean;
+  aiBriefingCacheMinutes: number;
+  rediscoveryFolders: string;
+  rediscoveryMinAgeDays: number;
+  rediscoveryCount: number;
   ankiEnabled: boolean;
   ankiAutoSuggestOnSave: boolean;
   ankiCardFormat: "both" | "basic-only" | "cloze-only";
@@ -19,13 +21,15 @@ export interface PluginSettings {
 export const DEFAULT_SETTINGS: PluginSettings = {
   ollamaEndpoint: "http://localhost:11434",
   ollamaModel: "qwen2.5:14b",
-  dashboardPath: "Dashboard.md",
   autoTagOnSave: true,
   autoConnectionScan: true,
   connectionScanIntervalMin: 30,
   connectionMinScore: 0.65,
-  autoDashboardRefresh: true,
-  dashboardRefreshIntervalHours: 2,
+  openDashboardOnStartup: true,
+  aiBriefingCacheMinutes: 120,
+  rediscoveryFolders: "",
+  rediscoveryMinAgeDays: 30,
+  rediscoveryCount: 3,
   ankiEnabled: false,
   ankiAutoSuggestOnSave: false,
   ankiCardFormat: "both",
@@ -145,42 +149,58 @@ export class AssistantSettingTab extends PluginSettingTab {
           }),
       );
 
-    new Setting(containerEl)
-      .setName("Auto-refresh dashboard")
-      .addToggle((toggle) =>
-        (toggle as any)
-          .setValue(this.settings.autoDashboardRefresh)
-          .onChange(async (value: boolean) => {
-            this.settings.autoDashboardRefresh = value;
-            await this.save();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Dashboard refresh interval (hours)")
-      .addSlider((slider) =>
-        (slider as any)
-          .setLimits(1, 12, 1)
-          .setValue(this.settings.dashboardRefreshIntervalHours)
-          .setDynamicTooltip()
-          .onChange(async (value: number) => {
-            this.settings.dashboardRefreshIntervalHours = value;
-            await this.save();
-          }),
-      );
-
     // --- Dashboard ---
     containerEl.createEl("h3", { text: "Dashboard" });
 
     new Setting(containerEl)
-      .setName("Dashboard location")
-      .setDesc("Path within your vault (e.g., Dashboard.md or AI-Assistant/Dashboard.md)")
+      .setName("Open dashboard on startup")
+      .setDesc("Automatically open the dashboard view when Obsidian starts")
+      .addToggle((toggle) =>
+        (toggle as any)
+          .setValue(this.settings.openDashboardOnStartup)
+          .onChange(async (value: boolean) => {
+            this.settings.openDashboardOnStartup = value;
+            await this.save();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("AI briefing cache (minutes)")
+      .setDesc("How long to cache the AI-generated briefing before regenerating")
+      .addSlider((slider) =>
+        (slider as any)
+          .setLimits(15, 480, 15)
+          .setValue(this.settings.aiBriefingCacheMinutes)
+          .setDynamicTooltip()
+          .onChange(async (value: number) => {
+            this.settings.aiBriefingCacheMinutes = value;
+            await this.save();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Rediscovery folders")
+      .setDesc("Comma-separated folder paths to surface old notes from")
       .addText((text) =>
         (text as any)
-          .setPlaceholder("Dashboard.md")
-          .setValue(this.settings.dashboardPath)
+          .setPlaceholder("Notes/, Ideas/")
+          .setValue(this.settings.rediscoveryFolders)
           .onChange(async (value: string) => {
-            this.settings.dashboardPath = value;
+            this.settings.rediscoveryFolders = value;
+            await this.save();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Rediscovery minimum age (days)")
+      .setDesc("Only surface notes older than this many days")
+      .addSlider((slider) =>
+        (slider as any)
+          .setLimits(7, 180, 7)
+          .setValue(this.settings.rediscoveryMinAgeDays)
+          .setDynamicTooltip()
+          .onChange(async (value: number) => {
+            this.settings.rediscoveryMinAgeDays = value;
             await this.save();
           }),
       );

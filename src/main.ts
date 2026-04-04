@@ -19,9 +19,8 @@ import { EmbeddingStore, fnv1aHash } from "./embeddings/store";
 import { SimilarityScorer } from "./embeddings/similarity";
 import { ConnectionModule } from "./modules/connections/connections";
 
-import { HabitTracker } from "./modules/dashboard/habits";
-import { DashboardModule } from "./modules/dashboard/dashboard";
 import { SuggestionModal } from "./ui/suggestion-modal";
+import { DashboardView, DASHBOARD_VIEW_TYPE } from "./dashboard/view";
 import { showNotice, showClickableNotice } from "./ui/notices";
 import { AnkiModule } from "./modules/anki/anki";
 import { CardMigration } from "./modules/anki/card-migration";
@@ -40,8 +39,7 @@ export default class AssistantPlugin extends Plugin {
   private similarityScorer!: SimilarityScorer;
   private connections = new ConnectionModule();
 
-  private habitTracker = new HabitTracker();
-  private dashboard = new DashboardModule();
+  private dashboardView: DashboardView | null = null;
   private debounceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
   private ankiModule = new AnkiModule();
   private cardMigration!: CardMigration;
@@ -106,6 +104,11 @@ export default class AssistantPlugin extends Plugin {
       return this.suggestionsPanel;
     });
 
+    this.registerView(DASHBOARD_VIEW_TYPE, (leaf) => {
+      this.dashboardView = new DashboardView(leaf, this.createDashboardDeps());
+      return this.dashboardView;
+    });
+
     this.addRibbonIcon("lightbulb", "AI Suggestions", () => {
       this.activateSuggestionsPanel();
     });
@@ -141,15 +144,9 @@ export default class AssistantPlugin extends Plugin {
     });
 
     this.addCommand({
-      id: "update-dashboard",
-      name: "Update dashboard",
-      callback: () => this.updateDashboard(),
-    });
-
-    this.addCommand({
-      id: "log-habit",
-      name: "Log habit",
-      callback: () => this.logHabit(),
+      id: "open-dashboard",
+      name: "Open dashboard",
+      callback: () => this.activateDashboard(),
     });
 
     this.addCommand({
@@ -253,14 +250,8 @@ export default class AssistantPlugin extends Plugin {
       );
     }
 
-    if (this.settings.autoDashboardRefresh) {
-      this.registerInterval(
-        window.setInterval(
-          () => this.updateDashboard(),
-          this.settings.dashboardRefreshIntervalHours * 60 * 60 * 1000,
-        ),
-      );
-      this.updateDashboard();
+    if (this.settings.openDashboardOnStartup) {
+      this.activateDashboard();
     }
   }
 
@@ -366,6 +357,35 @@ export default class AssistantPlugin extends Plugin {
 
   // --- Panel activation ---
 
+  private async activateDashboard(): Promise<void> {
+    const existing = this.app.workspace.getLeavesOfType(DASHBOARD_VIEW_TYPE);
+    if (existing.length > 0) {
+      this.app.workspace.revealLeaf(existing[0]);
+      return;
+    }
+    const leaf = this.app.workspace.getLeaf(true);
+    await leaf.setViewState({ type: DASHBOARD_VIEW_TYPE, active: true });
+    this.app.workspace.revealLeaf(leaf);
+  }
+
+  private createDashboardDeps() {
+    return {
+      readNote: (path: string) => this.vaultService.readNote(path),
+      writeNote: (path: string, content: string) => this.vaultService.writeNote(path, content),
+      getMarkdownFiles: () => this.vaultService.getMarkdownFiles(),
+      openNote: (path: string) => this.app.workspace.openLinkText(path, ""),
+      llmProvider: this.ollama,
+      assistantFolder: ASSISTANT_FOLDER,
+      settings: {
+        aiBriefingCacheMinutes: this.settings.aiBriefingCacheMinutes,
+        rediscoveryFolders: this.settings.rediscoveryFolders
+          .split(",").map((s) => s.trim()).filter((s) => s.length > 0),
+        rediscoveryMinAgeDays: this.settings.rediscoveryMinAgeDays,
+        rediscoveryCount: this.settings.rediscoveryCount,
+      },
+    };
+  }
+
   private async activateSuggestionsPanel(): Promise<void> {
     const existing = this.app.workspace.getLeavesOfType(SUGGESTIONS_VIEW_TYPE);
     if (existing.length > 0) {
@@ -410,15 +430,6 @@ export default class AssistantPlugin extends Plugin {
         `${folder}/goals.md`,
         "# Goals\n\n- Add your goals here\n",
       );
-    }
-    if (!this.vaultService.noteExists(`${folder}/habits.md`)) {
-      await this.vaultService.writeNote(
-        `${folder}/habits.md`,
-        "# Habits\n\n- Exercise (daily)\n- Read 30 min (daily)\n",
-      );
-    }
-    if (!this.vaultService.noteExists(`${folder}/habit-log.md`)) {
-      await this.vaultService.writeNote(`${folder}/habit-log.md`, "{}");
     }
   }
 
@@ -630,89 +641,6 @@ export default class AssistantPlugin extends Plugin {
     });
 
     this.orchestrator.queue.enqueue(task);
-  }
-
-  // --- Dashboard commands ---
-
-  private async updateDashboard(): Promise<void> {
-    const goalsContent =
-      (await this.vaultService.readNote(`${ASSISTANT_FOLDER}/goals.md`)) ?? "";
-    const habitsContent =
-      (await this.vaultService.readNote(`${ASSISTANT_FOLDER}/habits.md`)) ?? "";
-    const habitLogJson =
-      (await this.vaultService.readNote(`${ASSISTANT_FOLDER}/habit-log.md`)) ?? "{}";
-
-    const habits = this.habitTracker.parseHabitsConfig(habitsContent);
-    const habitLog = this.habitTracker.deserializeLog(habitLogJson);
-    const today = new Date().toISOString().split("T")[0];
-
-    // Collect recently modified files (last 7 days)
-    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    const recentActivity = this.vaultService
-      .getMarkdownFiles()
-      .filter((f) => f.stat.mtime > sevenDaysAgo)
-      .sort((a, b) => b.stat.mtime - a.stat.mtime)
-      .map((f) => ({
-        path: f.path,
-        action: "modified",
-        date: new Date(f.stat.mtime).toISOString().split("T")[0],
-      }));
-
-    // Count notes that have suggested-tags in their frontmatter
-    let pendingSuggestions = 0;
-    for (const file of this.vaultService.getMarkdownFiles()) {
-      const fm = await this.vaultService.parseFrontmatter(file.path);
-      if (Array.isArray(fm["suggested-tags"]) && fm["suggested-tags"].length > 0) {
-        pendingSuggestions++;
-      }
-    }
-
-    const md = this.dashboard.renderDashboard({
-      goalsContent,
-      habitsMarkdown: this.habitTracker.renderHabitsMarkdown(habits, habitLog, today),
-      recentActivity,
-      pendingSuggestions,
-      failedTasks: this.orchestrator.queue.getFailedTasks().length,
-    });
-
-    await this.vaultService.writeNote(this.settings.dashboardPath, md);
-  }
-
-  // --- Habit commands ---
-
-  private async logHabit(): Promise<void> {
-    const habitsContent =
-      (await this.vaultService.readNote(`${ASSISTANT_FOLDER}/habits.md`)) ?? "";
-    const habits = this.habitTracker.parseHabitsConfig(habitsContent);
-
-    if (habits.length === 0) {
-      showNotice("No habits defined. Edit AI-Assistant/habits.md to add some.");
-      return;
-    }
-
-    const today = new Date().toISOString().split("T")[0];
-    const habitLogJson =
-      (await this.vaultService.readNote(`${ASSISTANT_FOLDER}/habit-log.md`)) ?? "{}";
-    let habitLog = this.habitTracker.deserializeLog(habitLogJson);
-
-    new SuggestionModal(
-      this.app,
-      `Log habits for ${today}`,
-      habits.map((h) => ({
-        label: h.name,
-        description: `${h.frequency} — ${(habitLog[h.name] ?? []).includes(today) ? "already logged today" : "not yet logged"}`,
-      })),
-      async (result) => {
-        for (const name of result.accepted) {
-          habitLog = this.habitTracker.logCompletion(habitLog, name, today);
-        }
-        await this.vaultService.writeNote(
-          `${ASSISTANT_FOLDER}/habit-log.md`,
-          this.habitTracker.serializeLog(habitLog),
-        );
-        showNotice(`Logged ${result.accepted.length} habit(s).`);
-      },
-    ).open();
   }
 
   // --- Task completion handlers ---
