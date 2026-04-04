@@ -205,6 +205,20 @@ export class AssistantSettingTab extends PluginSettingTab {
           }),
       );
 
+    new Setting(containerEl)
+      .setName("Rediscovery count")
+      .setDesc("How many old notes to surface on the dashboard each day")
+      .addSlider((slider) =>
+        (slider as any)
+          .setLimits(1, 10, 1)
+          .setValue(this.settings.rediscoveryCount)
+          .setDynamicTooltip()
+          .onChange(async (value: number) => {
+            this.settings.rediscoveryCount = value;
+            await this.save();
+          }),
+      );
+
     // --- Anki ---
     containerEl.createEl("h3", { text: "Anki Cards" });
 

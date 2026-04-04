@@ -32,6 +32,7 @@ If no merges are needed, respond with: {"suggestions": []}`;
       prompt,
       maxTokens: 1000,
       temperature: 0.1,
+      jsonMode: true,
     };
   }
 

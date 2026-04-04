@@ -59,6 +59,7 @@ Suggest 3-8 cards depending on note complexity.`;
       prompt,
       maxTokens: 1500,
       temperature: 0.3,
+      jsonMode: true,
     };
   }
 

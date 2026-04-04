@@ -53,6 +53,7 @@ If none are meaningfully related (this is common), return: {"connections": []}`;
       prompt,
       maxTokens: 500,
       temperature: 0.2,
+      jsonMode: true,
     };
   }
 

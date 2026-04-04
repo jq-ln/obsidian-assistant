@@ -38,6 +38,8 @@ export class DashboardView extends ItemView {
   private rediscoveryCache: RediscoverySelection | null = null;
   /** Cached frontmatter from the last 7 daily notes, keyed by date string. */
   private dailyFrontmatters = new Map<string, Record<string, any>>();
+  /** Cached task list from last full data load — avoids re-scanning vault on every interaction. */
+  private cachedTasks: VaultTask[] = [];
 
   constructor(leaf: WorkspaceLeaf, deps: DashboardDeps) {
     super(leaf);
@@ -64,6 +66,18 @@ export class DashboardView extends ItemView {
     // Load frontmatter from the last 7 daily notes
     const today = new Date().toISOString().split("T")[0];
     await this.loadDailyFrontmatters(today, 7);
+
+    // Scan vault for tasks (cached, only refreshed on full load)
+    const allFiles = this.deps.getMarkdownFiles();
+    const tasks: VaultTask[] = [];
+    for (const file of allFiles) {
+      if (file.path.startsWith(`${this.deps.assistantFolder}/`)) continue;
+      const content = await this.deps.readNote(file.path);
+      if (content) {
+        tasks.push(...extractTasks(content, file.path));
+      }
+    }
+    this.cachedTasks = rankTasks(tasks);
 
     const rediscoveryJson = await this.deps.readNote(`${this.deps.assistantFolder}/rediscovery.json`);
     if (rediscoveryJson) {
@@ -207,28 +221,17 @@ export class DashboardView extends ItemView {
       }
     }
 
-    // --- Shared vault scan (used by tasks + briefing) ---
+    // --- Active Tasks (from cached scan) ---
     const allFiles = this.deps.getMarkdownFiles();
-    const allTasks: VaultTask[] = [];
-    for (const file of allFiles) {
-      if (file.path.startsWith(`${this.deps.assistantFolder}/`)) continue;
-      const content = await this.deps.readNote(file.path);
-      if (content) {
-        allTasks.push(...extractTasks(content, file.path));
-      }
-    }
-    const ranked = rankTasks(allTasks);
-
-    // --- Active Tasks ---
     const taskCard = this.createCard(leftCol, "Active Tasks");
 
-    if (ranked.length === 0) {
+    if (this.cachedTasks.length === 0) {
       const empty = taskCard.createDiv();
       empty.style.color = "var(--text-muted)";
       empty.style.fontSize = "0.85em";
       empty.setText("No open tasks.");
     } else {
-      for (const task of ranked) {
+      for (const task of this.cachedTasks) {
         const row = taskCard.createDiv();
         row.style.fontSize = "0.85em";
         row.style.padding = "2px 0";
@@ -431,7 +434,7 @@ export class DashboardView extends ItemView {
 
     // --- Generate briefing async (reuses allFiles + allTasks from shared scan) ---
     if (!cached) {
-      this.generateBriefing(briefingText, today, allFiles, ranked);
+      this.generateBriefing(briefingText, today, allFiles, this.cachedTasks);
     }
   }
 

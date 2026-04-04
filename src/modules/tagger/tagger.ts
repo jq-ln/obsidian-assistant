@@ -47,6 +47,7 @@ Return between 1 and 5 tags. Prefer fewer, more relevant tags over many vague on
       prompt,
       maxTokens: 200,
       temperature: 0.2,
+      jsonMode: true,
     };
   }
 
@@ -82,6 +83,7 @@ Return between 1 and 5 tags per note.`;
       prompt,
       maxTokens: 100 * input.notes.length,
       temperature: 0.2,
+      jsonMode: true,
     };
   }
 
