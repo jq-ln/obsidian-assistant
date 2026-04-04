@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseTrackingConfig } from "@/dashboard/tracking-config";
-import { TrackingLog, parseInputValue } from "@/dashboard/tracking-log";
+import { parseInputValue, getRecentValues } from "@/dashboard/tracking-log";
 import { renderChart } from "@/dashboard/chart";
 import { parseQuickLinks, resolveNotePath } from "@/dashboard/quick-links";
 import { selectRediscoveryNotes } from "@/dashboard/rediscovery";
@@ -8,17 +8,19 @@ import { extractTasks, rankTasks } from "@/dashboard/task-query";
 import { BriefingBuilder } from "@/dashboard/briefing";
 
 describe("Dashboard data pipeline", () => {
-  it("tracking config → log → chart renders end-to-end", () => {
+  it("tracking config → frontmatter → chart renders end-to-end", () => {
     const config = "- Sitting Time (hours, goal: <3)\n- Exercise (boolean)";
     const entries = parseTrackingConfig(config);
     expect(entries).toHaveLength(2);
 
-    const log = new TrackingLog();
-    log.logValue("Sitting Time", "2026-04-01", 4.2);
-    log.logValue("Sitting Time", "2026-04-02", 3.9);
-    log.logValue("Sitting Time", "2026-04-03", 3.8);
+    // Simulate daily note frontmatters
+    const fms = new Map<string, Record<string, any>>([
+      ["2026-04-01", { "sitting-time": 4.2 }],
+      ["2026-04-02", { "sitting-time": 3.9 }],
+      ["2026-04-03", { "sitting-time": 3.8 }],
+    ]);
 
-    const recentData = log.getRecentValues("Sitting Time", "2026-04-03", 7);
+    const recentData = getRecentValues(fms, "Sitting Time", "2026-04-03", 7);
     const numeric = entries.find((e) => e.type === "numeric")!;
 
     const svg = renderChart({

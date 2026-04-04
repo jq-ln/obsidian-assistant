@@ -1,11 +1,5 @@
 export type DayValue = { date: string; value: number | null };
 
-// Schema: { schemaVersion: 1, entries: { [metric: string]: { [date: string]: number } } }
-type LogData = {
-  schemaVersion: 1;
-  entries: Record<string, Record<string, number>>;
-};
-
 /**
  * Parse a user input string into a numeric value.
  * Accepts: integers, floats, and h:mm time strings (converted to decimal hours).
@@ -41,73 +35,29 @@ export function daysAgo(today: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-export class TrackingLog {
-  private entries: Record<string, Record<string, number>>;
+/** Convert a metric name to a frontmatter-safe key: lowercase, spaces to hyphens. */
+export function metricToKey(name: string): string {
+  return name.toLowerCase().replace(/\s+/g, "-");
+}
 
-  constructor() {
-    this.entries = {};
+/** Read tracking values from daily note frontmatter for the last N days. */
+export function getRecentValues(
+  dailyFrontmatters: Map<string, Record<string, any>>,
+  metricName: string,
+  today: string,
+  days: number,
+): DayValue[] {
+  const key = metricToKey(metricName);
+  const result: DayValue[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const date = daysAgo(today, i);
+    const fm = dailyFrontmatters.get(date);
+    const raw = fm?.[key];
+    let value: number | null = null;
+    if (raw === true) value = 1;
+    else if (raw === false) value = 0;
+    else if (typeof raw === "number") value = raw;
+    result.push({ date, value });
   }
-
-  logValue(metric: string, date: string, value: number): void {
-    if (!this.entries[metric]) {
-      this.entries[metric] = {};
-    }
-    this.entries[metric][date] = value;
-  }
-
-  getValue(metric: string, date: string): number | null {
-    const metricData = this.entries[metric];
-    if (!metricData) return null;
-    const val = metricData[date];
-    return val !== undefined ? val : null;
-  }
-
-  toggleBoolean(metric: string, date: string): void {
-    const current = this.getValue(metric, date);
-    // null or 0 -> 1; 1 -> 0
-    this.logValue(metric, date, current === 1 ? 0 : 1);
-  }
-
-  /**
-   * Returns an array of DayValue for the last `days` days ending on `today` (inclusive).
-   * Index 0 is the oldest day, index days-1 is today.
-   */
-  getRecentValues(metric: string, today: string, days: number): DayValue[] {
-    const result: DayValue[] = [];
-    for (let i = days - 1; i >= 0; i--) {
-      const date = daysAgo(today, i);
-      result.push({ date, value: this.getValue(metric, date) });
-    }
-    return result;
-  }
-
-  serialize(): string {
-    const data: LogData = {
-      schemaVersion: 1,
-      entries: this.entries,
-    };
-    return JSON.stringify(data);
-  }
-
-  static deserialize(json: string): TrackingLog {
-    const data: LogData = JSON.parse(json);
-    const log = new TrackingLog();
-    log.entries = data.entries ?? {};
-    return log;
-  }
-
-  /**
-   * Migrate from the old habit-log format:
-   * { [habitName: string]: string[] }  (array of completed dates)
-   */
-  static migrateFromHabitLog(json: string): TrackingLog {
-    const old: Record<string, string[]> = JSON.parse(json);
-    const log = new TrackingLog();
-    for (const [habit, dates] of Object.entries(old)) {
-      for (const date of dates) {
-        log.logValue(habit, date, 1);
-      }
-    }
-    return log;
-  }
+  return result;
 }

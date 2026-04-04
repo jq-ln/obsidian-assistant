@@ -376,6 +376,8 @@ export default class AssistantPlugin extends Plugin {
     return {
       readNote: (path: string) => this.vaultService.readNote(path),
       writeNote: (path: string, content: string) => this.vaultService.writeNote(path, content),
+      parseFrontmatter: (path: string) => this.vaultService.parseFrontmatter(path),
+      updateFrontmatter: (path: string, updates: Record<string, any>) => this.vaultService.updateFrontmatter(path, updates),
       getMarkdownFiles: () => this.vaultService.getMarkdownFiles(),
       openNote: (path: string) => this.app.workspace.openLinkText(path, ""),
       llmProvider: this.ollama,

@@ -1,6 +1,6 @@
 import { ItemView, WorkspaceLeaf, TFile } from "obsidian";
 import { parseTrackingConfig, TrackingEntry } from "./tracking-config";
-import { TrackingLog, parseInputValue, DayValue } from "./tracking-log";
+import { parseInputValue, DayValue, daysAgo, metricToKey, getRecentValues } from "./tracking-log";
 import { renderChart } from "./chart";
 import { parseQuickLinks, resolveNotePath, QuickLink } from "./quick-links";
 import { selectRediscoveryNotes, RediscoverySelection } from "./rediscovery";
@@ -22,6 +22,8 @@ export interface DashboardSettings {
 export interface DashboardDeps {
   readNote: (path: string) => Promise<string | null>;
   writeNote: (path: string, content: string) => Promise<void>;
+  parseFrontmatter: (path: string) => Promise<Record<string, any>>;
+  updateFrontmatter: (path: string, updates: Record<string, any>) => Promise<void>;
   getMarkdownFiles: () => Array<{ path: string; stat: { mtime: number }; basename: string }>;
   openNote: (path: string) => void;
   llmProvider: LLMProvider;
@@ -32,9 +34,10 @@ export interface DashboardDeps {
 
 export class DashboardView extends ItemView {
   private deps: DashboardDeps;
-  private trackingLog: TrackingLog = new TrackingLog();
   private briefingBuilder = new BriefingBuilder();
   private rediscoveryCache: RediscoverySelection | null = null;
+  /** Cached frontmatter from the last 7 daily notes, keyed by date string. */
+  private dailyFrontmatters = new Map<string, Record<string, any>>();
 
   constructor(leaf: WorkspaceLeaf, deps: DashboardDeps) {
     super(leaf);
@@ -58,21 +61,9 @@ export class DashboardView extends ItemView {
   }
 
   private async loadData(): Promise<void> {
-    const logJson = await this.deps.readNote(`${this.deps.assistantFolder}/tracking-log.json`);
-    if (logJson) {
-      try { this.trackingLog = TrackingLog.deserialize(logJson); } catch { this.trackingLog = new TrackingLog(); }
-    }
-
-    // Migrate from old habit-log format if needed
-    if (!logJson) {
-      const oldLog = await this.deps.readNote(`${this.deps.assistantFolder}/habit-log.md`);
-      if (oldLog && oldLog.trim() !== "{}") {
-        try {
-          this.trackingLog = TrackingLog.migrateFromHabitLog(oldLog);
-          await this.saveTrackingLog();
-        } catch { /* old format unreadable, start fresh */ }
-      }
-    }
+    // Load frontmatter from the last 7 daily notes
+    const today = new Date().toISOString().split("T")[0];
+    await this.loadDailyFrontmatters(today, 7);
 
     const rediscoveryJson = await this.deps.readNote(`${this.deps.assistantFolder}/rediscovery.json`);
     if (rediscoveryJson) {
@@ -80,11 +71,45 @@ export class DashboardView extends ItemView {
     }
   }
 
-  private async saveTrackingLog(): Promise<void> {
-    await this.deps.writeNote(
-      `${this.deps.assistantFolder}/tracking-log.json`,
-      this.trackingLog.serialize(),
-    );
+  private async loadDailyFrontmatters(today: string, days: number): Promise<void> {
+    this.dailyFrontmatters.clear();
+    const config = this.deps.getDailyNoteConfig();
+    if (!config) return;
+
+    for (let i = days - 1; i >= 0; i--) {
+      const date = daysAgo(today, i);
+      const path = this.resolveDailyNotePath(date, config);
+      const fm = await this.deps.parseFrontmatter(path);
+      if (Object.keys(fm).length > 0) {
+        this.dailyFrontmatters.set(date, fm);
+      }
+    }
+  }
+
+  private resolveDailyNotePath(date: string, config: { folder: string; format: string }): string {
+    const [year, month, day] = date.split("-");
+    let filename = config.format
+      .replace("YYYY", year)
+      .replace("MM", month)
+      .replace("DD", day);
+    filename = filename.replace(/\[(.+?)\]/g, "$1");
+    const folder = config.folder ? config.folder + "/" : "";
+    return `${folder}${filename}.md`;
+  }
+
+  private async writeTrackingValue(metricName: string, value: any): Promise<void> {
+    const config = this.deps.getDailyNoteConfig();
+    if (!config) return;
+    const today = new Date().toISOString().split("T")[0];
+    const path = this.resolveDailyNotePath(today, config);
+
+    // Ensure the daily note exists
+    const existing = await this.deps.readNote(path);
+    if (existing === null) {
+      await this.deps.writeNote(path, "");
+    }
+
+    await this.deps.updateFrontmatter(path, { [metricToKey(metricName)]: value });
   }
 
   private async saveRediscovery(selection: RediscoverySelection): Promise<void> {
@@ -277,7 +302,7 @@ export class DashboardView extends ItemView {
         row.createSpan({ text: entry.name });
 
         const gridSpan = row.createSpan();
-        const recentData = this.trackingLog.getRecentValues(entry.name, today, 7);
+        const recentData = getRecentValues(this.dailyFrontmatters, entry.name, today, 7);
 
         for (let i = 0; i < recentData.length; i++) {
           const day = recentData[i];
@@ -288,8 +313,9 @@ export class DashboardView extends ItemView {
           if (isToday) {
             cell.style.cursor = "pointer";
             cell.addEventListener("click", async () => {
-              this.trackingLog.toggleBoolean(entry.name, today);
-              await this.saveTrackingLog();
+              const current = day.value === 1;
+              await this.writeTrackingValue(entry.name, !current);
+              await this.loadDailyFrontmatters(today, 7);
               this.render();
             });
           }
@@ -338,7 +364,9 @@ export class DashboardView extends ItemView {
       inputRow.style.gap = "8px";
       inputRow.style.marginBottom = "8px";
 
-      const currentValue = this.trackingLog.getValue(entry.name, today);
+      const key = metricToKey(entry.name);
+      const todayFm = this.dailyFrontmatters.get(today);
+      const currentValue = todayFm?.[key] ?? null;
 
       const input = inputRow.createEl("input");
       input.type = "text";
@@ -360,13 +388,13 @@ export class DashboardView extends ItemView {
           setTimeout(() => { input.style.borderColor = "var(--background-modifier-border)"; }, 1000);
           return;
         }
-        this.trackingLog.logValue(entry.name, today, parsed);
-        await this.saveTrackingLog();
+        await this.writeTrackingValue(entry.name, parsed);
+        await this.loadDailyFrontmatters(today, 7);
         this.render();
       });
 
       // Trend display
-      const recentData = this.trackingLog.getRecentValues(entry.name, today, 7);
+      const recentData = getRecentValues(this.dailyFrontmatters, entry.name, today, 7);
       const nonNullValues = recentData.map((d) => d.value).filter((v) => v !== null) as number[];
 
       if (nonNullValues.length >= 2) {
@@ -464,7 +492,7 @@ export class DashboardView extends ItemView {
         .map((e) => ({
           name: e.name,
           unit: e.unit ?? "",
-          recentValues: this.trackingLog.getRecentValues(e.name, today, 7).map((d) => d.value).filter((v): v is number => v !== null),
+          recentValues: getRecentValues(this.dailyFrontmatters, e.name, today, 7).map((d) => d.value).filter((v): v is number => v !== null),
           goalValue: e.goalValue ?? undefined,
           goalDirection: (e.goalDirection ?? undefined) as "<" | ">" | undefined,
         }));
