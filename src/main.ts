@@ -448,22 +448,22 @@ export default class AssistantPlugin extends Plugin {
         `${folder}/tracking.md`,
         `# Tracking
 
-Define your habits and metrics here. Each line is one tracked item.
+Each line is one tracked item. Values are stored in your daily note's frontmatter.
 
-## Boolean habits (daily yes/no)
-- Exercise (boolean)
-- Read 30m (boolean)
+## Habits (yes/no — just the name)
+- Exercise
+- Read 30m
 
-## Numeric metrics (tracked with a value)
+## Metrics (tracked with a number)
 - Sitting Time (hours, goal: <3)
 
 Formats:
-- Name (boolean) — a daily checkbox habit
+- Name — a daily yes/no habit (rendered as a streak grid)
 - Name (unit) — a numeric metric without a goal
 - Name (unit, goal: <N) — goal is to stay below N
 - Name (unit, goal: >N) — goal is to stay above N
 
-Units are just labels (hours, reps, problems, etc.) — they appear on the graph but don't affect calculations.
+Units are labels (hours, reps, etc.) shown on the graph.
 `,
       );
     }
