@@ -93,9 +93,19 @@ function formatDate(format: string, date: Date): string {
   });
 }
 
-export function resolveNotePath(link: QuickLink, now: Date): string {
-  const folder = link.folder ?? "";
-  const format = link.dateFormat ?? "YYYY-MM-DD";
+export function resolveNotePath(
+  link: QuickLink,
+  now: Date,
+  dailyNoteConfig?: { folder: string; format: string } | null,
+): string {
+  let folder = link.folder ?? "";
+  let format = link.dateFormat ?? "YYYY-MM-DD";
+
+  if (link.useDailyNoteSettings && dailyNoteConfig) {
+    folder = dailyNoteConfig.folder ? dailyNoteConfig.folder + "/" : "";
+    format = dailyNoteConfig.format || "YYYY-MM-DD";
+  }
+
   const datePart = formatDate(format, now);
   return `${folder}${datePart}.md`;
 }

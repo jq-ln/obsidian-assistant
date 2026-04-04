@@ -5,6 +5,7 @@ export interface ChartData {
 }
 
 const DAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
+const VALID_COLOR = /^#[0-9a-fA-F]{3,8}$/;
 
 const WIDTH = 240;
 const HEIGHT = 70;
@@ -20,6 +21,7 @@ function parseDateDow(dateStr: string): number {
 }
 
 export function renderChart(data: ChartData): string {
+  const color = VALID_COLOR.test(data.color) ? data.color : "#7c6ff5";
   const nonNull = data.values.filter((v) => v.value !== null) as Array<{
     date: string;
     value: number;
@@ -72,7 +74,7 @@ export function renderChart(data: ChartData): string {
       .map((v) => `${xAt(v.i).toFixed(2)},${yAt(v.value as number).toFixed(2)}`)
       .join(" ");
     parts.push(
-      `<polyline points="${polyPoints}" fill="none" stroke="${data.color}" stroke-width="1.5"/>`
+      `<polyline points="${polyPoints}" fill="none" stroke="${color}" stroke-width="1.5"/>`
     );
 
     // Circles for each non-null point
@@ -81,7 +83,7 @@ export function renderChart(data: ChartData): string {
         const cx = xAt(v.i).toFixed(2);
         const cy = yAt(v.value).toFixed(2);
         parts.push(
-          `<circle cx="${cx}" cy="${cy}" r="2.5" fill="${data.color}"/>`
+          `<circle cx="${cx}" cy="${cy}" r="2.5" fill="${color}"/>`
         );
       }
     }
@@ -90,7 +92,7 @@ export function renderChart(data: ChartData): string {
     if (data.goalValue !== null) {
       const gy = yAt(data.goalValue).toFixed(2);
       parts.push(
-        `<line x1="${PAD_LEFT}" y1="${gy}" x2="${WIDTH - PAD_RIGHT}" y2="${gy}" stroke="${data.color}" stroke-width="1" stroke-dasharray="3 2" opacity="0.5"/>`
+        `<line x1="${PAD_LEFT}" y1="${gy}" x2="${WIDTH - PAD_RIGHT}" y2="${gy}" stroke="${color}" stroke-width="1" stroke-dasharray="3 2" opacity="0.5"/>`
       );
     }
   }

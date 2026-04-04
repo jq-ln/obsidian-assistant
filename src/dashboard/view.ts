@@ -12,6 +12,13 @@ export const DASHBOARD_VIEW_TYPE = "assistant-dashboard";
 
 const METRIC_COLORS = ["#7c6ff5", "#f59e0b", "#4ade80", "#f87171", "#38bdf8", "#a78bfa"];
 
+export interface DashboardSettings {
+  aiBriefingCacheMinutes: number;
+  rediscoveryFolders: string[];
+  rediscoveryMinAgeDays: number;
+  rediscoveryCount: number;
+}
+
 export interface DashboardDeps {
   readNote: (path: string) => Promise<string | null>;
   writeNote: (path: string, content: string) => Promise<void>;
@@ -19,12 +26,8 @@ export interface DashboardDeps {
   openNote: (path: string) => void;
   llmProvider: LLMProvider;
   assistantFolder: string;
-  settings: {
-    aiBriefingCacheMinutes: number;
-    rediscoveryFolders: string[];
-    rediscoveryMinAgeDays: number;
-    rediscoveryCount: number;
-  };
+  getSettings: () => DashboardSettings;
+  getDailyNoteConfig: () => { folder: string; format: string } | null;
 }
 
 export class DashboardView extends ItemView {
@@ -126,13 +129,13 @@ export class DashboardView extends ItemView {
     briefingText.style.color = "var(--text-normal)";
     briefingText.style.lineHeight = "1.5";
 
-    const cached = this.briefingBuilder.getCachedBriefing(this.deps.settings.aiBriefingCacheMinutes);
+    const settings = this.deps.getSettings();
+    const cached = this.briefingBuilder.getCachedBriefing(settings.aiBriefingCacheMinutes);
     if (cached) {
       briefingText.setText(cached);
     } else {
       briefingText.setText("Generating briefing...");
       briefingText.style.color = "var(--text-muted)";
-      this.generateBriefing(briefingText, today);
     }
 
     // --- Main grid ---
@@ -173,14 +176,13 @@ export class DashboardView extends ItemView {
         btn.style.fontSize = "0.85em";
         btn.style.color = "var(--text-normal)";
         btn.addEventListener("click", () => {
-          const path = resolveNotePath(link, now);
+          const path = resolveNotePath(link, now, this.deps.getDailyNoteConfig());
           this.deps.openNote(path);
         });
       }
     }
 
-    // --- Active Tasks ---
-    const taskCard = this.createCard(leftCol, "Active Tasks");
+    // --- Shared vault scan (used by tasks + briefing) ---
     const allFiles = this.deps.getMarkdownFiles();
     const allTasks: VaultTask[] = [];
     for (const file of allFiles) {
@@ -191,6 +193,9 @@ export class DashboardView extends ItemView {
       }
     }
     const ranked = rankTasks(allTasks);
+
+    // --- Active Tasks ---
+    const taskCard = this.createCard(leftCol, "Active Tasks");
 
     if (ranked.length === 0) {
       const empty = taskCard.createDiv();
@@ -395,6 +400,11 @@ export class DashboardView extends ItemView {
       const svgEl = chartDiv.querySelector("svg");
       if (svgEl) svgEl.style.width = "100%";
     }
+
+    // --- Generate briefing async (reuses allFiles + allTasks from shared scan) ---
+    if (!cached) {
+      this.generateBriefing(briefingText, today, allFiles, ranked);
+    }
   }
 
   private createCard(parent: HTMLElement, label: string): HTMLElement {
@@ -428,10 +438,11 @@ export class DashboardView extends ItemView {
       .filter((f) => !f.path.startsWith(`${this.deps.assistantFolder}/`))
       .map((f) => ({ path: f.path, mtime: f.stat.mtime }));
 
+    const s = this.deps.getSettings();
     const paths = selectRediscoveryNotes(files, {
-      folders: this.deps.settings.rediscoveryFolders,
-      minAgeDays: this.deps.settings.rediscoveryMinAgeDays,
-      count: this.deps.settings.rediscoveryCount,
+      folders: s.rediscoveryFolders,
+      minAgeDays: s.rediscoveryMinAgeDays,
+      count: s.rediscoveryCount,
       today,
     });
 
@@ -439,16 +450,13 @@ export class DashboardView extends ItemView {
     return paths;
   }
 
-  private async generateBriefing(targetEl: HTMLElement, today: string): Promise<void> {
+  private async generateBriefing(
+    targetEl: HTMLElement,
+    today: string,
+    allFiles: Array<{ path: string; stat: { mtime: number }; basename: string }>,
+    tasks: VaultTask[],
+  ): Promise<void> {
     try {
-      const allFiles = this.deps.getMarkdownFiles();
-      const allTasks: VaultTask[] = [];
-      for (const file of allFiles) {
-        if (file.path.startsWith(`${this.deps.assistantFolder}/`)) continue;
-        const content = await this.deps.readNote(file.path);
-        if (content) allTasks.push(...extractTasks(content, file.path));
-      }
-
       const trackingContent = await this.deps.readNote(`${this.deps.assistantFolder}/tracking.md`);
       const entries = trackingContent ? parseTrackingConfig(trackingContent) : [];
       const trackingData = entries
@@ -458,7 +466,7 @@ export class DashboardView extends ItemView {
           unit: e.unit ?? "",
           recentValues: this.trackingLog.getRecentValues(e.name, today, 7).map((d) => d.value).filter((v): v is number => v !== null),
           goalValue: e.goalValue ?? undefined,
-          goalDirection: (e.goalDirection ?? undefined) as "<" | ">" | "=" | undefined,
+          goalDirection: (e.goalDirection ?? undefined) as "<" | ">" | undefined,
         }));
 
       const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
@@ -469,7 +477,7 @@ export class DashboardView extends ItemView {
         .map((f) => f.basename);
 
       const prompt = this.briefingBuilder.buildPrompt({
-        tasks: rankTasks(allTasks, 15).map((t) => ({
+        tasks: tasks.slice(0, 15).map((t) => ({
           text: t.text,
           sourcePath: t.sourcePath,
           dueDate: t.dueDate ?? undefined,

@@ -380,12 +380,18 @@ export default class AssistantPlugin extends Plugin {
       openNote: (path: string) => this.app.workspace.openLinkText(path, ""),
       llmProvider: this.ollama,
       assistantFolder: ASSISTANT_FOLDER,
-      settings: {
+      getSettings: () => ({
         aiBriefingCacheMinutes: this.settings.aiBriefingCacheMinutes,
         rediscoveryFolders: this.settings.rediscoveryFolders
           .split(",").map((s) => s.trim()).filter((s) => s.length > 0),
         rediscoveryMinAgeDays: this.settings.rediscoveryMinAgeDays,
         rediscoveryCount: this.settings.rediscoveryCount,
+      }),
+      getDailyNoteConfig: () => {
+        const dailyNotes = (this.app as any).internalPlugins?.getPluginById?.("daily-notes");
+        if (!dailyNotes?.enabled) return null;
+        const config = dailyNotes.instance?.options;
+        return config ? { folder: config.folder ?? "", format: config.format ?? "YYYY-MM-DD" } : null;
       },
     };
   }

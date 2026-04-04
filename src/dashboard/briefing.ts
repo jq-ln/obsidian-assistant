@@ -11,7 +11,7 @@ export interface TrackingDataItem {
   unit: string;
   recentValues: number[];
   goalValue?: number;
-  goalDirection?: "<" | ">" | "=";
+  goalDirection?: "<" | ">";
 }
 
 export interface BriefingInput {
