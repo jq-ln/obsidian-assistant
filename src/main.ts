@@ -109,6 +109,10 @@ export default class AssistantPlugin extends Plugin {
       return this.dashboardView;
     });
 
+    this.addRibbonIcon("layout-dashboard", "Dashboard", () => {
+      this.activateDashboard();
+    });
+
     this.addRibbonIcon("lightbulb", "AI Suggestions", () => {
       this.activateSuggestionsPanel();
     });
@@ -429,6 +433,46 @@ export default class AssistantPlugin extends Plugin {
       await this.vaultService.writeNote(
         `${folder}/goals.md`,
         "# Goals\n\n- Add your goals here\n",
+      );
+    }
+    if (!this.vaultService.noteExists(`${folder}/tracking.md`)) {
+      await this.vaultService.writeNote(
+        `${folder}/tracking.md`,
+        `# Tracking
+
+Define your habits and metrics here. Each line is one tracked item.
+
+## Boolean habits (daily yes/no)
+- Exercise (boolean)
+- Read 30m (boolean)
+
+## Numeric metrics (tracked with a value)
+- Sitting Time (hours, goal: <3)
+
+Formats:
+- Name (boolean) — a daily checkbox habit
+- Name (unit) — a numeric metric without a goal
+- Name (unit, goal: <N) — goal is to stay below N
+- Name (unit, goal: >N) — goal is to stay above N
+
+Units are just labels (hours, reps, problems, etc.) — they appear on the graph but don't affect calculations.
+`,
+      );
+    }
+    if (!this.vaultService.noteExists(`${folder}/quick-links.md`)) {
+      await this.vaultService.writeNote(
+        `${folder}/quick-links.md`,
+        `# Quick Links
+
+Dashboard buttons that open or create notes. One per line.
+
+- Journal (daily, use daily note settings)
+
+Formats:
+- Name (daily, use daily note settings) — uses Obsidian's Daily Notes config
+- Name (daily, folder: Dreams/, format: YYYY-MM-DD) — custom folder and date format
+- Name (weekly, folder: Reviews/, format: YYYY-[W]ww) — weekly notes with ISO week
+`,
       );
     }
   }

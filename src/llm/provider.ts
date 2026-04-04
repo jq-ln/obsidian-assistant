@@ -3,6 +3,7 @@ export interface LLMRequest {
   prompt: string;
   maxTokens: number;
   temperature?: number;
+  jsonMode?: boolean;
 }
 
 export interface LLMResponse {

@@ -71,6 +71,7 @@ export class BriefingBuilder {
       system: SYSTEM_PROMPT,
       prompt,
       maxTokens: 200,
+      jsonMode: false,
     };
   }
 
